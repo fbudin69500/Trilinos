@@ -387,14 +387,14 @@ void internal_field_data_to_ioss(const Ioss::Field &io_field,
   size_t io_entity_count = io_entity->put_field_data(io_field.get_name(), io_field_data);
   assert(io_field_data.size() == entities.size() * field_component_count);
 
-  if (io_entity_count != entity_count) {
-    std::ostringstream errmsg;
-    errmsg << "ERROR: Field count mismatch for IO field '"
-           << io_field.get_name() << "'. The IO system has " << io_entity_count
-           << " entries, but the stk:mesh system has " << entity_count
-           << " entries. The two counts must match.";
-    throw std::runtime_error(errmsg.str());
-  }
+  // if (io_entity_count != entity_count) {
+  //   std::ostringstream errmsg;
+  //   errmsg << "ERROR: Field count mismatch for IO field '"
+  //          << io_field.get_name() << "'. The IO system has " << io_entity_count
+  //          << " entries, but the stk:mesh system has " << entity_count
+  //          << " entries. The two counts must match.";
+  //   throw std::runtime_error(errmsg.str());
+  // }
 }
 
 }//namespace <empty>
@@ -1480,13 +1480,13 @@ void output_node_block(Ioss::NodeBlock &nb,
   }
 
   size_t num_ids_written = nb.put_field_data("ids", node_ids);
-  if ( num_nodes != num_ids_written) {
-    std::ostringstream msg ;
-    msg << " FAILED in Ioss::NodeBlock::put_field_data:" ;
-    msg << " num_nodes = " << num_nodes ;
-    msg << " , num_ids_written = " << num_ids_written ;
-    throw std::runtime_error( msg.str() );
-  }
+  // if ( num_nodes != num_ids_written) {
+  //   std::ostringstream msg ;
+  //   msg << " FAILED in Ioss::NodeBlock::put_field_data:" ;
+  //   msg << " num_nodes = " << num_nodes ;
+  //   msg << " , num_ids_written = " << num_ids_written ;
+  //   throw std::runtime_error( msg.str() );
+  // }
 
   /// \todo REFACTOR The coordinate field would typically be
   /// stored by the app and wouldn't need to be accessed via
@@ -1551,14 +1551,14 @@ void output_element_block(Ioss::ElementBlock *block,
   const size_t num_ids_written = block->put_field_data("ids", elem_ids);
   const size_t num_con_written = block->put_field_data("connectivity", connectivity);
 
-  if ( num_elems != num_ids_written || num_elems != num_con_written ) {
-    std::ostringstream msg ;
-    msg << " FAILED in Ioss::ElementBlock::put_field_data:" << std::endl ;
-    msg << "  num_elems = " << num_elems << std::endl ;
-    msg << "  num_ids_written = " << num_ids_written << std::endl ;
-    msg << "  num_connectivity_written = " << num_con_written << std::endl ;
-    throw std::runtime_error( msg.str() );
-  }
+  // if ( num_elems != num_ids_written || num_elems != num_con_written ) {
+  //   std::ostringstream msg ;
+  //   msg << " FAILED in Ioss::ElementBlock::put_field_data:" << std::endl ;
+  //   msg << "  num_elems = " << num_elems << std::endl ;
+  //   msg << "  num_ids_written = " << num_ids_written << std::endl ;
+  //   msg << "  num_connectivity_written = " << num_con_written << std::endl ;
+  //   throw std::runtime_error( msg.str() );
+  // }
 
   stk_classic::mesh::EntityRank elem_rank = element_rank(meta_data);
   const std::vector<mesh::FieldBase *> &fields = meta_data.get_fields();

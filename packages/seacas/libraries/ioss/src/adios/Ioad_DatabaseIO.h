@@ -74,6 +74,7 @@ namespace Ioad {
     bool end__(Ioss::State state) override;
 
     unsigned int entity_field_support () const {return 0;}
+    int int_byte_size_db() const;
 
   private:
     int64_t get_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
