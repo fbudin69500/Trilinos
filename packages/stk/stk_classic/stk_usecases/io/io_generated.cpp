@@ -59,7 +59,7 @@ int main(int argc, char** argv)
   bool compression_shuffle = false;
   int db_integer_size = 4;
 
-
+std::cout<<"plop"<<std::endl;
   //----------------------------------
   // Process the broadcast command line arguments
   bopt::options_description desc("options");
@@ -146,7 +146,7 @@ namespace {
       
     std::string file = working_directory;
     file += filename;
-    type="adios";
+    
     stk_classic::io::create_input_mesh(type, file, comm, fem_meta_data, mesh_data);
     stk_classic::io::define_input_fields(mesh_data, fem_meta_data);
 

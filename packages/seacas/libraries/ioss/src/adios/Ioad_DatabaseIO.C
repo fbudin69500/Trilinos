@@ -82,10 +82,6 @@ namespace Ioad {
                          const Ioss::PropertyManager &properties_x)
       : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x)
   {
-    // A history file is only written on processor 0...
-    if (db_usage == Ioss::WRITE_HISTORY)
-      isParallel = false;
-
     dbState = Ioss::STATE_UNKNOWN;
 
 
@@ -103,7 +99,7 @@ namespace Ioad {
     // if not defined by user, we can change the default settings
     // BPFile is the default engine
     bpio->SetEngine("BPFile");
-    bpio->SetParameters({{"num_threads", "1"}});
+    //bpio->SetParameters({{"num_threads", "1"}});
 
     // ISO-POSIX file output is the default transport (called "File")
     // Passing parameters to the transport
@@ -163,7 +159,19 @@ namespace Ioad {
     // We need to have the vector object here not to destruct here until the end
     // of function.
     
-    //bpWriter->Put<double>(*varT, v.data());
+    // define T as 2D global array
+        std::vector<double> v(100,0);
+
+    adios2::Variable<double> *varT = &bpio->DefineVariable<double>(
+        "T",
+        // Global dimensions
+        {10, 10},
+        // starting offset of the local array in the global space
+        {0, 0},
+        // local size, could be defined later using SetSelection()
+        {10, 10});
+
+    bpWriter->Put<double>(*varT, v.data());
     bpWriter->EndStep();
   }
 
@@ -204,4 +212,14 @@ namespace Ioad {
     }
   }
 
-}
+  // TODO: write actual code!
+  // Returns byte size of integers stored on the database...
+  int DatabaseIO::int_byte_size_db() const
+  {
+    return 4;
+  }
+
+
+} // end of namespace
+
+

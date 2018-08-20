@@ -3799,6 +3799,7 @@ int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Fi
     Ioss::SerializeIO serializeIO__(this);
 
     size_t num_to_get = field.verify(data_size);
+    std::cout<<"size nodeblock:"<<num_to_get<<std::endl;
     if (num_to_get > 0) {
 
       Ioss::Field::RoleType role = field.get_role();

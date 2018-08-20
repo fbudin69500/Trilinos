@@ -700,6 +700,7 @@ void create_output_mesh(const std::string &filename,
   }
 
   Ioss::DatabaseIO *dbo = Ioss::IOFactory::create("exodusII", out_filename,
+  //Ioss::DatabaseIO *dbo = Ioss::IOFactory::create("adios", out_filename,
                                                   Ioss::WRITE_RESULTS,
                                                   comm, mesh_data.m_property_manager);
   // set up the casing for variable names
