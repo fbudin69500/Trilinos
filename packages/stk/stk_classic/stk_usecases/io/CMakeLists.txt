@@ -21,3 +21,7 @@ SET(SOURCES "")
 APPEND_SET(SOURCES
     io_generated.cpp
 )
+
+
+TRIBITS_ADD_EXECUTABLE( io_generated SOURCES ${SOURCES} )
+TRIBITS_ADD_EXECUTABLE( io_example SOURCES io_example.cpp )

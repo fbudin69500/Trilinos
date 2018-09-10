@@ -9,7 +9,7 @@ IF ( ${PACKAGE_NAME}_ENABLE_SEACASIoss )
 ENDIF()
 
 
-IF ( ${PACKAGE_NAME}_ENABLE_BoostLib )
+IF ( TPL_ENABLE_BoostLib )
   ADD_SUBDIRECTORY(use_cases)
 ENDIF()
 
