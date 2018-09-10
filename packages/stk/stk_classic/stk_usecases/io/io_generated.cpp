@@ -31,6 +31,7 @@
 #include <stk_io/MeshReadWriteUtils.hpp>
 
 #include <init/Ionit_Initializer.h>
+#include <Ioad_Initializer.h>
 #include <Ioss_SubSystem.h>
 
 namespace {
@@ -118,7 +119,7 @@ namespace {
     // Initialize IO system.  Registers all element types and storage
     // types and the exodusII default database type.
     Ioss::Init::Initializer init_db;
-
+    Ioad::Initializer(); // ADIOS2
     stk_classic::mesh::fem::FEMMetaData fem_meta_data( spatial_dimension );
     stk_classic::mesh::MetaData &meta_data = fem_meta_data.get_meta_data( fem_meta_data );
     stk_classic::io::MeshData mesh_data;
@@ -145,6 +146,7 @@ namespace {
       
     std::string file = working_directory;
     file += filename;
+    type="adios";
     stk_classic::io::create_input_mesh(type, file, comm, fem_meta_data, mesh_data);
     stk_classic::io::define_input_fields(mesh_data, fem_meta_data);
 
