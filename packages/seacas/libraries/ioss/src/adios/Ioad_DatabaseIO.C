@@ -104,6 +104,8 @@ namespace Ioad {
     // ISO-POSIX file output is the default transport (called "File")
     // Passing parameters to the transport
     bpio->AddTransport("File", {{"Library", "POSIX"}});
+    bpio->DefineAttribute("IOSS_adios_version", 1);
+
     bpWriter = &bpio->Open(filename, adios2::Mode::Write, communicator);
   }
 
@@ -217,6 +219,64 @@ namespace Ioad {
   int DatabaseIO::int_byte_size_db() const
   {
     return 4;
+  }
+
+  int64_t put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field, void *data,
+                               size_t data_size)
+  {
+    size_t num_to_get = field.verify(data_size);
+ 
+    Ioss::Field::RoleType role = field.get_role();
+
+  size_t proc_offset = 0;
+  if (nb->property_exists("processor_offset")) {
+    proc_offset = nb->get_property("processor_offset").get_int();
+  }
+  size_t file_count = num_to_get;
+  if (nb->property_exists("locally_owned_count")) {
+    file_count = nb->get_property("locally_owned_count").get_int();
+  }
+
+    if (role == Ioss::Field::MESH) {
+      if (field.get_name() == "owning_processor") {
+    }
+
+    else if (field.get_name() == "mesh_model_coordinates_x") {
+    }
+    else if (field.get_name() == "mesh_model_coordinates_y") {
+    }
+    else if (field.get_name() == "mesh_model_coordinates_z") {
+    }
+    else if (field.get_name() == "mesh_model_coordinates") {
+    }
+    else if (field.get_name() == "ids") {
+      // The ids coming in are the global ids; their position is the
+      // local id -1 (That is, data[0] contains the global id of local
+      // node 1)
+
+      // Another 'const-cast' since we are modifying the database just
+      // for efficiency; which the client does not see...
+      //handle_node_ids(data, num_to_get, proc_offset, file_count);
+    }
+    else if (field.get_name() == "connectivity") {
+      // Do nothing, just handles an idiosyncrasy of the GroupingEntity
+    }
+    else if (field.get_name() == "connectivity_raw") {
+      // Do nothing, just handles an idiosyncrasy of the GroupingEntity
+    }
+    else if (field.get_name() == "node_connectivity_status") {
+      // Do nothing, input only field.
+    }
+    else if (field.get_name() == "implicit_ids") {
+      // Do nothing, input only field.
+    }
+    else {
+    }
+    }
+    else if (role == Ioss::Field::TRANSIENT) {
+      }
+    else if (role == Ioss::Field::REDUCTION) {
+    }
   }
 
 
