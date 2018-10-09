@@ -31,7 +31,7 @@
 #include <stk_io/MeshReadWriteUtils.hpp>
 
 #include <init/Ionit_Initializer.h>
-#include <Ioad_Initializer.h>
+#include <adios/Ioad_Initializer.h>
 #include <Ioss_SubSystem.h>
 
 namespace {

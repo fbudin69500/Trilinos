@@ -221,8 +221,8 @@ namespace Ioad {
     return 4;
   }
 
-  int64_t put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field, void *data,
-                               size_t data_size)
+  int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field, void *data,
+                               size_t data_size) const
   {
     size_t num_to_get = field.verify(data_size);
  
