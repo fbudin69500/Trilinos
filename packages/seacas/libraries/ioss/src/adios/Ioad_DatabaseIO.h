@@ -37,7 +37,7 @@
 #include <Ioss_DBUsage.h>
 #include <Ioss_DatabaseIO.h>
 
-
+#include <adios2.h>
 
 namespace Ioss {
   class GroupingEntity;
@@ -51,11 +51,6 @@ namespace Ioss {
   class CommSet;
 }
 
-namespace adios2 {
-   class IO;
-   class ADIOS;
-   class Engine;
-}
 
 /** \brief A namespace for the adios database format.
  */
@@ -135,10 +130,14 @@ namespace Ioad {
 
     int64_t element_global_to_local__(int64_t global) const {return 0;}
     int64_t node_global_to_local__(int64_t global, bool must_exist) const {return 0;}
-    
-    adios2::IO *bpio;
+
+    template <typename T> void put_data(adios2::IO &bpio, const Ioss::Field &field, void *data, const std::string &encoded_name) const;
+    template <typename T> void write_meta_data_internal(adios2::IO &bpio, const Ioss::Field &field, const std::string &encoded_name) const;
     adios2::ADIOS *ad;
-    adios2::Engine *bpWriter;
+
+    mutable adios2::Engine bpWriter;
+    std::map<std::pair<std::string, std::string>, std::string> entityNames;
+    int spatialDimension{0};
   };
 }
 #endif
