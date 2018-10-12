@@ -59,7 +59,6 @@ int main(int argc, char** argv)
   bool compression_shuffle = false;
   int db_integer_size = 4;
 
-std::cout<<"plop"<<std::endl;
   //----------------------------------
   // Process the broadcast command line arguments
   bopt::options_description desc("options");
