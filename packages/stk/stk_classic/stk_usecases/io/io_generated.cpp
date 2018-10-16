@@ -166,5 +166,12 @@ namespace {
       stk_classic::io::process_input_request(mesh_data, bulk_data, step);
       stk_classic::io::process_output_request(mesh_data, bulk_data, time);
     }
+
+        // Read generated mesh - debug
+    stk_classic::mesh::fem::FEMMetaData fem_meta_data2( spatial_dimension );
+    stk_classic::mesh::MetaData &meta_data2 = fem_meta_data2.get_meta_data( fem_meta_data2 );
+    stk_classic::io::MeshData mesh_data2;
+    stk_classic::io::create_input_mesh("adios", output_filename, comm, fem_meta_data2, mesh_data2);
+
   }
 }

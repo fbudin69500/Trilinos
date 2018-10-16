@@ -129,7 +129,7 @@ namespace Ioad {
                                size_t data_size) const;
     void read_meta_data__ () override;
     void define_model();
-    void read_region();
+    void read_region(adios2::IO & bpio);
 
 
     int64_t element_global_to_local__(int64_t global) const {return 0;}
@@ -138,12 +138,16 @@ namespace Ioad {
     template <typename T> void put_data(adios2::IO &bpio, const Ioss::Field &field, void *data, const std::string &encoded_name) const;
     template <typename T> void define_model_internal(adios2::IO &bpio, const Ioss::Field &field, const std::string &encoded_name);
     template<typename T>  void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
+    template <typename T> void read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair);
 
     adios2::ADIOS *ad;
     const std::string schema_version_string = "IOSS_adios_version";
     mutable adios2::Engine bpWriter;
+    adios2::Engine bpReader;
     std::map<std::pair<std::string, std::string>, std::string> entityNames;
     int spatialDimension{0};
+    unsigned long rank;
+    unsigned long number_proc;
   };
 }
 #endif

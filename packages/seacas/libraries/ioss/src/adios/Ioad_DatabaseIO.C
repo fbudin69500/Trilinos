@@ -66,8 +66,8 @@
 //#include <stdlib.h>               // for atoi
 //#include <string>                 // for char_traits, string, etc
 //#include <vector>                 // for vector, etc
-#include <adios/Ioad_DatabaseIO.h>
 #include "adios2/helper/adiosFunctions.h"
+#include <adios/Ioad_DatabaseIO.h>
 
 namespace Ioss {
   class PropertyManager;
@@ -83,31 +83,23 @@ namespace Ioad {
       : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x)
   {
     Ioss::SerializeIO serializeIO__(this);
+    rank        = Ioss::SerializeIO::getRank();
+    number_proc = Ioss::SerializeIO::getSize();
 
     dbState = Ioss::STATE_UNKNOWN;
-
-    //    // Construct the HDF and XML filenames for XDMF
-    //    std::string decoded_name = util().decode_filename(filename, isParallel);
-
-    //    hdfname = Ioss::FileInfo(decoded_name + ".h5");
-    //    xmlname = Ioss::FileInfo(decoded_name + ".xmf");
-
-    ad = new adios2::ADIOS(communicator);
-    //    adios2::ADIOS adios(communicator);
-    adios2::IO bpio = ad->DeclareIO("writer");
-
-    // adios2::IO bpio = ad->DeclareIO("writer");
-    // bpiop = &bpio;
-    // if not defined by user, we can change the default settings
-    // BPFile is the default engine
-    bpio.SetEngine("BPFile");
-    // bpio->SetParameters({{"num_threads", "1"}});
-
-    // ISO-POSIX file output is the default transport (called "File")
-    // Passing parameters to the transport
-    bpio.AddTransport("File", {{"Library", "POSIX"}});
-
-    bpWriter = bpio.Open(filename, adios2::Mode::Write, communicator);
+    ad      = new adios2::ADIOS(communicator);
+    if (!is_input()) {
+      adios2::IO bpio = ad->DeclareIO("writer");
+      bpio.SetEngine("BPFile");
+      bpio.AddTransport("File", {{"Library", "POSIX"}});
+      bpWriter = bpio.Open(filename, adios2::Mode::Write, communicator);
+    }
+    {
+      adios2::IO reader_io = ad->DeclareIO("reader");
+      reader_io.SetEngine("BPFile");
+      reader_io.AddTransport("File", {{"Library", "POSIX"}});
+      bpReader = reader_io.Open(filename, adios2::Mode::Read, communicator);
+    }
   }
 
   DatabaseIO::~DatabaseIO()
@@ -142,8 +134,6 @@ namespace Ioad {
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input())
         bpWriter.EndStep();
-        //Debug
-        read_meta_data__();
       //      write_results_metadata();
       break;
     default: // ignore everything else...
@@ -165,15 +155,14 @@ namespace Ioad {
   void DatabaseIO::define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
                                          const std::string &encoded_name)
   {
-    static int                rank        = Ioss::SerializeIO::getRank();
-    static int                number_proc = Ioss::SerializeIO::getSize();
-    const Ioss::VariableType *field_var   = field.raw_storage();
-    size_t                    local_size  = field.raw_count() * field_var->component_count();
+    const Ioss::VariableType *field_var  = field.raw_storage();
+    size_t                    local_size = field.raw_count() * field_var->component_count();
     // size_t global_size     = number_proc * local_size;
     bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, local_size});
   }
 
-  template <typename T> void DatabaseIO::define_entity_internal(const T &entity_blocks, adios2::IO &bpio)
+  template <typename T>
+  void DatabaseIO::define_entity_internal(const T &entity_blocks, adios2::IO &bpio)
   {
     Ioss::NameList names;
     for (auto entity_block : entity_blocks) {
@@ -236,7 +225,7 @@ namespace Ioad {
     assert(node_blocks.size() == 1);
     // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
-    adios2::IO     bpio = ad->AtIO("writer");
+    adios2::IO bpio = ad->AtIO("writer");
 
     bpio.DefineAttribute<unsigned int>(schema_version_string, 1);
 
@@ -392,13 +381,49 @@ namespace Ioad {
     put_field_internal(cs->type_string(), field, data, data_size);
   }
 
-  void DatabaseIO::read_region()
+  template <typename T>
+  void DatabaseIO::read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair)
   {
-    adios2::IO bpio = ad->AtIO("reader");
-    bpio.SetEngine("BPFile");
+    auto v = bpio.InquireVariable<T>(vpair.first);
+     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks = bpReader.AllStepsBlocksInfo(v);
+    if (!allblocks.empty()) {
+      size_t ndim = v.Shape().size();
+      /*Only query the block size of the current process based on the process rank.*/
+      if (ndim == 0) {
+        exit(0); /*not handled. Crash to not forget that it has to be improved.*/
+      }
+      else {
+        size_t laststep = allblocks.rbegin()->first;
+        size_t ndim     = v.Shape().size();
+        for (auto &blockpair : allblocks) {
+          size_t                                  step   = blockpair.first;
+          std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
+          std::cout << "step: " << step << std::endl;
+          std::cout << "block:" << std::endl;
+          for (size_t j = 0; j < blocks.size(); j++) {
+            for (size_t k = 0; k < ndim; k++) {
+              if (blocks[j].Count[k]) {
+                std::cout << "!" << blocks[j].Start[k] << ":"
+                          << blocks[j].Start[k] + blocks[j].Count[k] - 1;
+              }
+              else {
+                exit(0); /*Not handled*/
+              }
+              if (k < ndim - 1)
+                std::cout << " - ";
+            }
+            std::cout << std::endl;
+          }
+        }
+      }
+    }
+  }
+
+  void DatabaseIO::read_region(adios2::IO &bpio)
+  {
 
     // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = bpio.InquireAttribute<unsigned int>("schema_version_string");
+    auto schema_version = bpio.InquireAttribute<unsigned int>(schema_version_string);
     if (!schema_version) {
       std::ostringstream errmsg;
       errmsg << "INTERNAL ERROR: schema_version_string not found. "
@@ -409,22 +434,27 @@ namespace Ioad {
     // Fow now, we do not do anything special based on the schema version. It is only used to check
     // that the input file is in the expected format.
 
-    const auto variables = bpio.AvailableVariables();
+    const std::map<std::string, std::map<std::string, std::string>> variables = bpio.AvailableVariables();
 
     for (const auto &vpair : variables) {
-        const std::string &name = vpair.first;
-        std::cout<<"name:"<<name<<std::endl;
-        std::cout<<"type:"<<vpair.second.at("Type")<<std::endl;
-        std::cout<<"elements:"<<vpair.second.at("Elements")<<std::endl;
-    if(vpair.second.at("Type") == "not supported")
-    {} // pass
-// #define declare_template_instantiation(T)                                      \
-//     else if (vpair.second == adios2::helper::GetType<T>())                       \
-//     {                                                                          \
-//         auto v = bpio.InquireVariable<T>(vpair.first);                   \
-//     }
-//                 ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
-// #undef declare_template_instantiation
+      const std::string &name = vpair.first;
+      std::cout << "name:" << name << std::endl;
+      // for (const auto &key : vpair.second) {
+      // std::cout << "key:" << key.first << std::endl;
+      // }
+      std::cout << "type:" << vpair.second.at("Type") << std::endl;
+      std::cout << "shape:" << vpair.second.at("Shape") << std::endl;
+      std::cout << "step counts:" << vpair.second.at("AvailableStepsCount") << std::endl;
+
+      // Simply to start the "else if" section with "if".
+      if (vpair.second.at("Type") == "not supported") {
+      }
+#define declare_template_instantiation(T)                             \
+  else if (vpair.second.at("Type") == adios2::helper::GetType<T>()) { \
+      /*read_variable_size<T>(bpio, vpair);*/                                           \
+      }
+      ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
+#undef declare_template_instantiation
 
       // //Entry e(true, vpair.second.first, vpair.second.second);
       //   const std::string &name   = vpair.first;
@@ -441,8 +471,8 @@ namespace Ioad {
 
   void DatabaseIO::read_meta_data__()
   {
-
-    read_region();
+    adios2::IO reader_io = ad->AtIO("reader");
+    read_region(reader_io);
     // read_communication_metadata();
 
     // get_step_times__();
