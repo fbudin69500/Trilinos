@@ -85,26 +85,25 @@ namespace Ioad {
     Ioss::SerializeIO serializeIO__(this);
     rank        = Ioss::SerializeIO::getRank();
     number_proc = Ioss::SerializeIO::getSize();
-
-    dbState = Ioss::STATE_UNKNOWN;
     ad      = new adios2::ADIOS(communicator);
+    dbState = Ioss::STATE_UNKNOWN;
     if (!is_input()) {
       adios2::IO bpio = ad->DeclareIO("writer");
       bpio.SetEngine("BPFile");
       bpio.AddTransport("File", {{"Library", "POSIX"}});
-      bpWriter = bpio.Open(filename, adios2::Mode::Write, communicator);
+      bp_engine = bpio.Open(filename, adios2::Mode::Write, communicator);
     }
-    {
+    else {
       adios2::IO reader_io = ad->DeclareIO("reader");
       reader_io.SetEngine("BPFile");
       reader_io.AddTransport("File", {{"Library", "POSIX"}});
-      bpReader = reader_io.Open(filename, adios2::Mode::Read, communicator);
+      bp_engine = reader_io.Open(filename, adios2::Mode::Read, communicator);
     }
   }
 
   DatabaseIO::~DatabaseIO()
   {
-    // bpWriter->Close();
+    bp_engine.Close();
     delete ad;
   }
 
@@ -112,7 +111,7 @@ namespace Ioad {
   {
     dbState = state;
     if (state == Ioss::STATE_MODEL || state == Ioss::STATE_DEFINE_TRANSIENT) {
-      bpWriter.BeginStep();
+      bp_engine.BeginStep();
     }
     return true;
   }
@@ -128,12 +127,12 @@ namespace Ioad {
       break;
     case Ioss::STATE_MODEL:
       if (!is_input()) {
-        bpWriter.EndStep();
+        bp_engine.EndStep();
       }
       break;
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input())
-        bpWriter.EndStep();
+        bp_engine.EndStep();
       //      write_results_metadata();
       break;
     default: // ignore everything else...
@@ -156,9 +155,9 @@ namespace Ioad {
                                          const std::string &encoded_name)
   {
     const Ioss::VariableType *field_var = field.raw_storage();
-    size_t local_size = field.raw_count();
     int component_count = field_var->component_count();
-    bpio.DefineVariable<T>(encoded_name, {number_proc, component_count, INT_MAX}, {rank, 0, 0}, {1, component_count, local_size});
+    size_t local_size = field.raw_count();
+    bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0}, {1, local_size, component_count});
   }
 
   template <typename T>
@@ -278,7 +277,7 @@ namespace Ioad {
     adios2::Variable<T> entities = bpio.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
-      bpWriter.Put<T>(entities, rdata,
+      bp_engine.Put<T>(entities, rdata,
                       adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
   }
@@ -385,7 +384,7 @@ namespace Ioad {
   void DatabaseIO::read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair)
   {
     auto v = bpio.InquireVariable<T>(vpair.first);
-     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks = bpReader.AllStepsBlocksInfo(v);
+     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks = bp_engine.AllStepsBlocksInfo(v);
     if (!allblocks.empty()) {
       size_t ndim = v.Shape().size();
       /*Only query the block size of the current process based on the process rank.*/
@@ -456,16 +455,7 @@ namespace Ioad {
       ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
 #undef declare_template_instantiation
 
-      // //Entry e(true, vpair.second.first, vpair.second.second);
-      //   const std::string &name   = vpair.first;
-      //   const Entry &      entry  = vpair.second;
-
-      //   size_t               ndim         = variable->m_Shape.size();
-      //   enum ADIOS_DATATYPES adiosvartype = type_to_enum(variable->m_Type);
-      //   std::map<size_t, std::vector<typename core::Variable<T>::Info>> allblocks =
-      //       fp->AllStepsBlocksInfo(*variable);
-      //   if (allblocks.empty()) {
-      //     return;
+    // Once everything is loaded, get global variables such as spatialDimension.
     }
   }
 

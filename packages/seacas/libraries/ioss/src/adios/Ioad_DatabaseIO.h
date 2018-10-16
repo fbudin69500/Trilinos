@@ -140,10 +140,11 @@ namespace Ioad {
     template<typename T>  void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
     template <typename T> void read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair);
 
+    //`ad` needs to be a pointer or a mutable to avoid the following errror:
+    // error: passing ‘const adios2::ADIOS’ as ‘this’ argument discards qualifiers
     adios2::ADIOS *ad;
     const std::string schema_version_string = "IOSS_adios_version";
-    mutable adios2::Engine bpWriter;
-    adios2::Engine bpReader;
+    mutable adios2::Engine bp_engine;
     std::map<std::pair<std::string, std::string>, std::string> entityNames;
     int spatialDimension{0};
     unsigned long rank;
