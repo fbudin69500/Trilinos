@@ -67,6 +67,8 @@
 //#include <string>                 // for char_traits, string, etc
 //#include <vector>                 // for vector, etc
 #include <adios/Ioad_DatabaseIO.h>
+#include "adios2/helper/adiosFunctions.h"
+
 namespace Ioss {
   class PropertyManager;
 }
@@ -104,7 +106,6 @@ namespace Ioad {
     // ISO-POSIX file output is the default transport (called "File")
     // Passing parameters to the transport
     bpio.AddTransport("File", {{"Library", "POSIX"}});
-    bpio.DefineAttribute("IOSS_adios_version", 1);
 
     bpWriter = bpio.Open(filename, adios2::Mode::Write, communicator);
   }
@@ -118,7 +119,7 @@ namespace Ioad {
   bool DatabaseIO::begin__(Ioss::State state)
   {
     dbState = state;
-    if(state == Ioss::STATE_MODEL || state == Ioss::STATE_DEFINE_TRANSIENT) {
+    if (state == Ioss::STATE_MODEL || state == Ioss::STATE_DEFINE_TRANSIENT) {
       bpWriter.BeginStep();
     }
     return true;
@@ -131,18 +132,20 @@ namespace Ioad {
     switch (state) {
     case Ioss::STATE_DEFINE_MODEL:
       if (!is_input())
-        write_meta_data();
+        define_model();
       break;
     case Ioss::STATE_MODEL:
-       if (!is_input()) {
-         bpWriter.EndStep();
-       }
+      if (!is_input()) {
+        bpWriter.EndStep();
+      }
       break;
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input())
-            bpWriter.EndStep();
-        //      write_results_metadata();
-        break;
+        bpWriter.EndStep();
+        //Debug
+        read_meta_data__();
+      //      write_results_metadata();
+      break;
     default: // ignore everything else...
       if (!is_input()) {
         //        WriteXmlFile(NumOfIterations);
@@ -159,56 +162,44 @@ namespace Ioad {
   }
 
   template <typename T>
-  void DatabaseIO::write_meta_data_internal(adios2::IO &bpio, const Ioss::Field &field,
-                                            const std::string &encoded_name) const
+  void DatabaseIO::define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
+                                         const std::string &encoded_name)
   {
-    static int rank        = Ioss::SerializeIO::getRank();
-    static int number_proc = Ioss::SerializeIO::getSize();
-    const Ioss::VariableType *field_var = field.raw_storage(); 
-    size_t     local_size  = field.raw_count() * field_var->component_count();
-    //size_t global_size     = number_proc * local_size;
+    static int                rank        = Ioss::SerializeIO::getRank();
+    static int                number_proc = Ioss::SerializeIO::getSize();
+    const Ioss::VariableType *field_var   = field.raw_storage();
+    size_t                    local_size  = field.raw_count() * field_var->component_count();
+    // size_t global_size     = number_proc * local_size;
     bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, local_size});
   }
 
-  void DatabaseIO::write_meta_data()
+  template <typename T> void DatabaseIO::define_entity_internal(const T &entity_blocks, adios2::IO &bpio)
   {
-    adios2::IO bpio = ad->AtIO("writer");
-
-    Ioss::Region *                  region      = get_region();
-    const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
-
-    // A single nodeblock named "nodeblock_1" will be created for the mesh. It contains information
-    // for every node that exists in the model (Ioss-exodus-mapping.pdf).
-    assert(node_blocks.size() == 1);
-    //int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
-
     Ioss::NameList names;
-    // Even though the region should contain only one nodeblock, we keep this code compatible with
-    // potentially multiple nodeblocks, just for future proof purpose.
-    for (auto node_block : node_blocks) {
-      std::string block_name = node_blocks[0]->type_string();
+    for (auto entity_block : entity_blocks) {
+      std::string entity_name = entity_blocks[0]->type_string();
 
-      node_block->field_describe(&names);
+      entity_block->field_describe(&names);
       for (auto name : names) {
-        // Allocate Nodeblock
-        auto        field        = node_block->get_fieldref(name);
-        std::string encoded_name = block_name + "-" + name;
-        entityNames[std::make_pair(name, node_blocks[0]->type_string())] = encoded_name;
+        // Define entity block variables
+        auto        field        = entity_block->get_fieldref(name);
+        std::string encoded_name = entity_name + "/" + name;
+        entityNames[std::make_pair(name, entity_block->type_string())] = encoded_name;
         switch (field.get_type()) {
         case Ioss::Field::BasicType::DOUBLE:
-          write_meta_data_internal<double>(bpio, field, encoded_name);
+          define_model_internal<double>(bpio, field, encoded_name);
           break;
         case Ioss::Field::BasicType::INT32:
-          write_meta_data_internal<int32_t>(bpio, field, encoded_name);
+          define_model_internal<int32_t>(bpio, field, encoded_name);
           break;
         case Ioss::Field::BasicType::INT64:
-          write_meta_data_internal<int64_t>(bpio, field, encoded_name);
+          define_model_internal<int64_t>(bpio, field, encoded_name);
           break;
         case Ioss::Field::BasicType::COMPLEX:
-          write_meta_data_internal<Complex>(bpio, field, encoded_name);
+          define_model_internal<Complex>(bpio, field, encoded_name);
           break;
         case Ioss::Field::BasicType::CHARACTER:
-          write_meta_data_internal<char>(bpio, field, encoded_name);
+          define_model_internal<char>(bpio, field, encoded_name);
           break;
         case Ioss::Field::BasicType::STRING:
           bpio.DefineVariable<std::string>(
@@ -222,13 +213,58 @@ namespace Ioad {
           break;
         default:
           std::ostringstream errmsg;
-          errmsg << "INTERNAL ERROR: Invalid field type. "
-                 << "Something is wrong in the Ioad::DatabaseIO::write_meta_data() function. "
-                 << "Please report.\n";
+          errmsg
+              << "INTERNAL ERROR: Invalid field type. "
+              << "Something is wrong in the Ioad::DatabaseIO::define_entity_internal() function. "
+              << "Please report.\n";
           IOSS_ERROR(errmsg);
         }
       }
     }
+  }
+
+  // Similar to `write_meta_data()` function in other DatabaseIO. This function has been renamed in
+  // this database to reflect more precisely what it accomplishes.
+  void DatabaseIO::define_model()
+  {
+
+    Ioss::Region *                  region      = get_region();
+    const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
+
+    // A single nodeblock named "nodeblock_1" will be created for the mesh. It contains information
+    // for every node that exists in the model (Ioss-exodus-mapping.pdf).
+    assert(node_blocks.size() == 1);
+    // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
+
+    adios2::IO     bpio = ad->AtIO("writer");
+
+    bpio.DefineAttribute<unsigned int>(schema_version_string, 1);
+
+    define_entity_internal<Ioss::NodeBlockContainer>(node_blocks, bpio);
+    // Edge Blocks --
+    const Ioss::EdgeBlockContainer &edge_blocks = region->get_edge_blocks();
+    define_entity_internal<Ioss::EdgeBlockContainer>(edge_blocks, bpio);
+    // Face Blocks --
+    const Ioss::FaceBlockContainer &face_blocks = region->get_face_blocks();
+    define_entity_internal<Ioss::FaceBlockContainer>(face_blocks, bpio);
+    // Element Blocks --
+    const Ioss::ElementBlockContainer &element_blocks = region->get_element_blocks();
+    define_entity_internal<Ioss::ElementBlockContainer>(element_blocks, bpio);
+    // Nodesets ...
+    const Ioss::NodeSetContainer &nodesets = region->get_nodesets();
+    define_entity_internal<Ioss::NodeSetContainer>(nodesets, bpio);
+    // Edgesets ...
+    const Ioss::EdgeSetContainer &edgesets = region->get_edgesets();
+    define_entity_internal<Ioss::EdgeSetContainer>(edgesets, bpio);
+    // Facesets ...
+    const Ioss::FaceSetContainer &facesets = region->get_facesets();
+    define_entity_internal<Ioss::FaceSetContainer>(facesets, bpio);
+    // Elementsets ...
+    const Ioss::ElementSetContainer &elementsets = region->get_elementsets();
+    define_entity_internal<Ioss::ElementSetContainer>(elementsets, bpio);
+    // SideSets ...
+    // const Ioss::SideSetContainer &ssets = region->get_sidesets();
+    // define_entity_internal<Ioss::SideSetContainer>(ssets);
   }
 
   //------------------------------------------------------------------------
@@ -253,7 +289,8 @@ namespace Ioad {
     adios2::Variable<T> entities = bpio.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
-      bpWriter.Put<T>(entities, rdata, adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      bpWriter.Put<T>(entities, rdata,
+                      adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
   }
 
@@ -264,64 +301,19 @@ namespace Ioad {
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    put_field_internal(nb->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const std::string &type_string, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
     size_t num_to_get = field.verify(data_size); // Compare to size reserved in io variable instead?
     Ioss::Field::RoleType role = field.get_role();
 
-    size_t proc_offset = 0;
-    if (nb->property_exists("processor_offset")) {
-      proc_offset = nb->get_property("processor_offset").get_int();
-    }
-    size_t file_count = num_to_get;
-    if (nb->property_exists("locally_owned_count")) {
-      file_count = nb->get_property("locally_owned_count").get_int();
-    }
-
-    if (role == Ioss::Field::MESH) {
-      if (field.get_name() == "owning_processor") {
-      }
-
-      else if (field.get_name() == "mesh_model_coordinates_x") {
-      }
-      else if (field.get_name() == "mesh_model_coordinates_y") {
-      }
-      else if (field.get_name() == "mesh_model_coordinates_z") {
-      }
-      else if (field.get_name() == "mesh_model_coordinates") {
-      }
-      else if (field.get_name() == "ids") {
-        // The ids coming in are the global ids; their position is the
-        // local id -1 (That is, data[0] contains the global id of local
-        // node 1)
-
-        // Another 'const-cast' since we are modifying the database just
-        // for efficiency; which the client does not see...
-        // handle_node_ids(data, num_to_get, proc_offset, file_count);
-      }
-      else if (field.get_name() == "connectivity") {
-        // Do nothing, just handles an idiosyncrasy of the GroupingEntity
-      }
-      else if (field.get_name() == "connectivity_raw") {
-        // Do nothing, just handles an idiosyncrasy of the GroupingEntity
-      }
-      else if (field.get_name() == "node_connectivity_status") {
-        // Do nothing, input only field.
-      }
-      else if (field.get_name() == "implicit_ids") {
-        // Do nothing, input only field.
-      }
-      else {
-      }
-    }
-    else if (role == Ioss::Field::TRANSIENT) {
-    }
-    else if (role == Ioss::Field::REDUCTION) {
-    }
-
     adios2::IO bpio = ad->AtIO("writer");
     // for (auto const& pairName : entityNames) {
-    std::string encoded_name =
-        entityNames.at(std::make_pair(field.get_name(), nb[0].type_string()));
-std::cout<<encoded_name<<std::endl;
+    std::string encoded_name = entityNames.at(std::make_pair(field.get_name(), type_string));
+
     switch (field.get_type()) {
     case Ioss::Field::BasicType::DOUBLE: put_data<double>(bpio, field, data, encoded_name); break;
     case Ioss::Field::BasicType::INT32: put_data<int32_t>(bpio, field, data, encoded_name); break;
@@ -339,5 +331,154 @@ std::cout<<encoded_name<<std::endl;
       IOSS_ERROR(errmsg);
     }
   }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(eb->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(eb->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(fb->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(sb->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(ns->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(es->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(fs->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(es->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(ss->type_string(), field, data, data_size);
+  }
+
+  int64_t DatabaseIO::put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    put_field_internal(cs->type_string(), field, data, data_size);
+  }
+
+  void DatabaseIO::read_region()
+  {
+    adios2::IO bpio = ad->AtIO("reader");
+    bpio.SetEngine("BPFile");
+
+    // Only get schema version attribute as it is the only one we expect.
+    auto schema_version = bpio.InquireAttribute<unsigned int>("schema_version_string");
+    if (!schema_version) {
+      std::ostringstream errmsg;
+      errmsg << "INTERNAL ERROR: schema_version_string not found. "
+             << "Something is wrong in the Ioad::DatabaseIO::read_region() function. "
+             << "Please check input file.\n";
+      IOSS_ERROR(errmsg);
+    }
+    // Fow now, we do not do anything special based on the schema version. It is only used to check
+    // that the input file is in the expected format.
+
+    const auto variables = bpio.AvailableVariables();
+
+    for (const auto &vpair : variables) {
+        const std::string &name = vpair.first;
+        std::cout<<"name:"<<name<<std::endl;
+        std::cout<<"type:"<<vpair.second.at("Type")<<std::endl;
+        std::cout<<"elements:"<<vpair.second.at("Elements")<<std::endl;
+    if(vpair.second.at("Type") == "not supported")
+    {} // pass
+// #define declare_template_instantiation(T)                                      \
+//     else if (vpair.second == adios2::helper::GetType<T>())                       \
+//     {                                                                          \
+//         auto v = bpio.InquireVariable<T>(vpair.first);                   \
+//     }
+//                 ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
+// #undef declare_template_instantiation
+
+      // //Entry e(true, vpair.second.first, vpair.second.second);
+      //   const std::string &name   = vpair.first;
+      //   const Entry &      entry  = vpair.second;
+
+      //   size_t               ndim         = variable->m_Shape.size();
+      //   enum ADIOS_DATATYPES adiosvartype = type_to_enum(variable->m_Type);
+      //   std::map<size_t, std::vector<typename core::Variable<T>::Info>> allblocks =
+      //       fp->AllStepsBlocksInfo(*variable);
+      //   if (allblocks.empty()) {
+      //     return;
+    }
+  }
+
+  void DatabaseIO::read_meta_data__()
+  {
+
+    read_region();
+    // read_communication_metadata();
+
+    // get_step_times__();
+
+    // get_nodeblocks();
+    // get_edgeblocks();
+    // get_faceblocks();
+    // get_elemblocks();
+
+    // check_side_topology();
+
+    // get_sidesets();
+    // get_nodesets();
+    // get_edgesets();
+    // get_facesets();
+    // get_elemsets();
+
+    // get_commsets();
+
+    // handle_groups();
+
+    // add_region_fields();
+
+    // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
+    //   get_map(EX_NODE_BLOCK);
+    //   get_map(EX_EDGE_BLOCK);
+    //   get_map(EX_FACE_BLOCK);
+    //   get_map(EX_ELEM_BLOCK);
+    // }
+  }
+
+  // int64_t DatabaseIO::put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field
+  // &field,
+  //                                        void *data, size_t data_size) const
+  // {
+  //   put_field_internal(sb->type_string(), field, data, data_size);
+  // }
 
 } // namespace Ioad
