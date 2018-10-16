@@ -155,10 +155,10 @@ namespace Ioad {
   void DatabaseIO::define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
                                          const std::string &encoded_name)
   {
-    const Ioss::VariableType *field_var  = field.raw_storage();
-    size_t                    local_size = field.raw_count() * field_var->component_count();
-    // size_t global_size     = number_proc * local_size;
-    bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, local_size});
+    const Ioss::VariableType *field_var = field.raw_storage();
+    size_t local_size = field.raw_count();
+    int component_count = field_var->component_count();
+    bpio.DefineVariable<T>(encoded_name, {number_proc, component_count, INT_MAX}, {rank, 0, 0}, {1, component_count, local_size});
   }
 
   template <typename T>
