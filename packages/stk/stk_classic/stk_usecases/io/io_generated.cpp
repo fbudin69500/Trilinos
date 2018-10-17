@@ -168,10 +168,13 @@ namespace {
     }
 
         // Read generated mesh - debug
-    // stk_classic::mesh::fem::FEMMetaData fem_meta_data2( spatial_dimension );
-    // stk_classic::mesh::MetaData &meta_data2 = fem_meta_data2.get_meta_data( fem_meta_data2 );
-    // stk_classic::io::MeshData mesh_data2;
-    // stk_classic::io::create_input_mesh("adios", output_filename, comm, fem_meta_data2, mesh_data2);
-
+    stk_classic::mesh::fem::FEMMetaData fem_meta_data2( spatial_dimension );
+    stk_classic::mesh::MetaData &meta_data2 = fem_meta_data2.get_meta_data( fem_meta_data2 );
+    stk_classic::io::MeshData mesh_data2;
+    stk_classic::io::create_input_mesh("adios", output_filename, comm, fem_meta_data2, mesh_data2);
+    //stk_classic::io::create_input_mesh("exodusII", output_filename, comm, fem_meta_data2, mesh_data2);
+    fem_meta_data2.commit();
+    stk_classic::mesh::BulkData bulk_data2(meta_data2 , comm);
+    stk_classic::io::populate_bulk_data(bulk_data2, mesh_data2);
   }
 }

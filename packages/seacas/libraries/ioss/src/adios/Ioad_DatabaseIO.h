@@ -38,6 +38,7 @@
 #include <Ioss_DatabaseIO.h>
 
 #include <adios2.h>
+#include <set>
 
 namespace Ioss {
   class GroupingEntity;
@@ -49,8 +50,7 @@ namespace Ioss {
   class NodeSet;
   class SideSet;
   class CommSet;
-}
-
+} // namespace Ioss
 
 /** \brief A namespace for the adios database format.
  */
@@ -68,36 +68,75 @@ namespace Ioad {
     bool begin__(Ioss::State state) override;
     bool end__(Ioss::State state) override;
 
-    unsigned int entity_field_support () const {return 0;}
-    int int_byte_size_db() const;
+    unsigned int entity_field_support() const { return 0; }
+    int          int_byte_size_db() const;
 
   private:
     int64_t get_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                               void *data, size_t data_size) const override {return 0;}
+                               void *data, size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
     int64_t get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field, void *data,
-                               size_t data_size) const override {return 0;}
+                               size_t data_size) const override
+    {
+      return 0;
+    }
 
     int64_t put_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
@@ -124,31 +163,67 @@ namespace Ioad {
     int64_t put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
     int64_t put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                               void *data, size_t data_size) const override {return 0;}
-    int64_t put_field_internal(const std::string &type_string, const Ioss::Field &field, void *data,
-                               size_t data_size) const;
-    void read_meta_data__ () override;
+                               void *data, size_t data_size) const override
+    {
+      return 0;
+    }
+    void put_field_internal(const std::string &entity_type, const std::string &entity_name,
+                            const Ioss::Field &field, void *data, size_t data_size) const;
+    void read_meta_data__() override;
     void define_model();
-    void read_region(adios2::IO & bpio);
+    // void read_region(adios2::IO & bpio);
 
+    int64_t element_global_to_local__(int64_t global) const { return 0; }
+    int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
 
-    int64_t element_global_to_local__(int64_t global) const {return 0;}
-    int64_t node_global_to_local__(int64_t global, bool must_exist) const {return 0;}
+    template <typename T>
+    void put_data(adios2::IO &bpio, const Ioss::Field &field, void *data,
+                  const std::string &encoded_name) const;
+    template <typename T>
+    void                       define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
+                                                     const std::string &encoded_name);
+    template <typename T> void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
 
-    template <typename T> void put_data(adios2::IO &bpio, const Ioss::Field &field, void *data, const std::string &encoded_name) const;
-    template <typename T> void define_model_internal(adios2::IO &bpio, const Ioss::Field &field, const std::string &encoded_name);
-    template<typename T>  void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
-    template <typename T> void read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair);
+    using BlockInfoType = std::tuple<std::vector<size_t>, std::pair<size_t, size_t>, size_t, Ioss::Field::RoleType>;
+
+    template <typename T>
+    BlockInfoType get_variable_infos(adios2::IO &       bpio,
+                                                      const std::string &var_name);
+    std::string encode_field_name(const std::string &entity_type, const std::string &entity_name,
+                                  const std::string &field_name) const;
+    std::tuple<std::string, std::string, std::string>
+         decode_field_name(const std::string &encoded_name) const;
+    using VariableMapType = std::map<std::string, std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>>;
+    void get_nodeblocks(adios2::IO &reader_io, const VariableMapType &variables);
+    void
+    add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
+                         std::map<std::string, std::pair<std::string, std::string>> field_names);
+
+    int find_field_in_mapset(const std::string &entity_type, const std::string &field_name, const std::map<std::string, std::set<std::string>> &mapset) const;
 
     //`ad` needs to be a pointer or a mutable to avoid the following errror:
     // error: passing ‘const adios2::ADIOS’ as ‘this’ argument discards qualifiers
-    adios2::ADIOS *ad;
-    const std::string schema_version_string = "IOSS_adios_version";
-    mutable adios2::Engine bp_engine;
-    std::map<std::pair<std::string, std::string>, std::string> entityNames;
-    int spatialDimension{0};
-    unsigned long rank;
-    unsigned long number_proc;
+    adios2::ADIOS *                                    ad;
+    const std::string                                  schema_version_string = "IOSS_adios_version";
+    mutable adios2::Engine                             bp_engine;
+    int                                                spatialDimension{0};
+    unsigned long                                      rank;
+    unsigned long                                      number_proc;
+    const std::string                                  name_separator         = "/";
+    const std::string                                  attribute_separator    = "::";
+    const std::string                                  role_attribute         = "role";
+    const std::map<std::string, std::set<std::string>> use_transformed_storage = {
+        {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
+        {"FaceBlock", {"connectivity_edge"}}};
+    const std::map<std::string, std::set<std::string>> ignore_fields = {
+        {"NodeBlock",
+         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
+        {"ElementBlock", {"implicit_ids"}},
+        {"FaceBlock", {"connectivity_raw"}},
+        {"EdgeBlock", {"connectivity_raw"}},
+        {"CommSet", {"ids"}},
+        {"SideSet", {"ids"}},
+        {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
   };
-}
+} // namespace Ioad
 #endif

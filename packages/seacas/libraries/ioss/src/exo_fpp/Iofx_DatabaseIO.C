@@ -504,7 +504,7 @@ namespace Iofx {
         eb->property_add(Ioss::Property("id", 1));
         eb->property_add(Ioss::Property("guid", util().generate_guid(1)));
         get_region()->add(eb);
-        get_step_times__();
+
         add_region_fields();
       }
       return;
@@ -3814,7 +3814,6 @@ int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Fi
     Ioss::SerializeIO serializeIO__(this);
 
     size_t num_to_get = field.verify(data_size);
-    std::cout<<"size nodeblock:"<<num_to_get<<std::endl;
     if (num_to_get > 0) {
 
       Ioss::Field::RoleType role = field.get_role();

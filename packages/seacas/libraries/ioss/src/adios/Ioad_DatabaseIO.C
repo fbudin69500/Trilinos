@@ -85,8 +85,8 @@ namespace Ioad {
     Ioss::SerializeIO serializeIO__(this);
     rank        = Ioss::SerializeIO::getRank();
     number_proc = Ioss::SerializeIO::getSize();
-    ad      = new adios2::ADIOS(communicator);
-    dbState = Ioss::STATE_UNKNOWN;
+    ad          = new adios2::ADIOS(communicator);
+    dbState     = Ioss::STATE_UNKNOWN;
     if (!is_input()) {
       adios2::IO bpio = ad->DeclareIO("writer");
       bpio.SetEngine("BPFile");
@@ -154,25 +154,69 @@ namespace Ioad {
   void DatabaseIO::define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
                                          const std::string &encoded_name)
   {
-    const Ioss::VariableType *field_var = field.raw_storage();
-    int component_count = field_var->component_count();
-    size_t local_size = field.raw_count();
-    bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0}, {1, local_size, component_count});
+    int         component_count;
+    size_t      local_size;
+    std::string entity_type, field_name;
+    std::tie(entity_type, std::ignore, field_name) = decode_field_name(encoded_name);
+    if (find_field_in_mapset(entity_type, field_name, ignore_fields)) {
+      return;
+    }
+    if (field.get_role() == Ioss::Field::RoleType::TRANSIENT ||
+        find_field_in_mapset(entity_type, field_name, use_transformed_storage)) {
+      component_count = field.transformed_storage()->component_count();
+      local_size      = field.transformed_count();
+    }
+    else {
+      component_count = field.raw_storage()->component_count();
+      local_size      = field.raw_count();
+    }
+
+    bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0},
+                           {1, local_size, component_count});
+  }
+
+  std::string DatabaseIO::encode_field_name(const std::string &entity_type,
+                                            const std::string &entity_name,
+                                            const std::string &field_name) const
+  {
+    return entity_type + name_separator + entity_name + name_separator + field_name;
+  }
+
+  std::tuple<std::string, std::string, std::string>
+  DatabaseIO::decode_field_name(const std::string &encoded_name) const
+  {
+    std::size_t current, previous = 0;
+    current = encoded_name.find_first_of(name_separator);
+    std::vector<std::string> container;
+    // Stop after finding `name_separator` twice as the result is suppose to be
+    // a triplet `entity_type`/`entity_name`/`field_name`
+    // This means `field_name` is allowed to contain `name_separator`.
+    while (current != std::string::npos && container.size() <= 2) {
+      container.push_back(encoded_name.substr(previous, current - previous));
+      previous = current + 1;
+      current  = encoded_name.find_first_of(name_separator, previous);
+    }
+    container.push_back(encoded_name.substr(previous, current - previous));
+    if (container.size() != 3) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Invalid encoded entity name. Does not contain 2 separators.\n";
+      IOSS_ERROR(errmsg);
+    }
+    return make_tuple(container[0], container[1], container[2]);
   }
 
   template <typename T>
   void DatabaseIO::define_entity_internal(const T &entity_blocks, adios2::IO &bpio)
   {
-    Ioss::NameList names;
+    Ioss::NameList field_names;
     for (auto entity_block : entity_blocks) {
-      std::string entity_name = entity_blocks[0]->type_string();
-
-      entity_block->field_describe(&names);
-      for (auto name : names) {
+      std::string entity_type = entity_blocks[0]->type_string();
+      std::string entity_name = entity_blocks[0]->name();
+      entity_block->field_describe(&field_names);
+      for (auto field_name : field_names) {
         // Define entity block variables
-        auto        field        = entity_block->get_fieldref(name);
-        std::string encoded_name = entity_name + "/" + name;
-        entityNames[std::make_pair(name, entity_block->type_string())] = encoded_name;
+        auto        field        = entity_block->get_fieldref(field_name);
+        std::string encoded_name = encode_field_name(entity_type, entity_name, field_name);
         switch (field.get_type()) {
         case Ioss::Field::BasicType::DOUBLE:
           define_model_internal<double>(bpio, field, encoded_name);
@@ -278,7 +322,11 @@ namespace Ioad {
     if (entities) {
       T *rdata = static_cast<T *>(data);
       bp_engine.Put<T>(entities, rdata,
-                      adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+                       adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      // Defining role attribute only when calling "Put" to avoid creating attributes for
+      // fields that are not saved.
+      bpio.DefineAttribute<int>(role_attribute, field.get_role(), encoded_name,
+                                attribute_separator);
     }
   }
 
@@ -289,18 +337,37 @@ namespace Ioad {
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(nb->type_string(), field, data, data_size);
+    put_field_internal(nb->type_string(), nb->name(), field, data, data_size);
   }
 
-  int64_t DatabaseIO::put_field_internal(const std::string &type_string, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
+  int DatabaseIO::find_field_in_mapset(
+      const std::string &entity_type, const std::string &field_name,
+      const std::map<std::string, std::set<std::string>> &mapset) const
   {
+    if (mapset.find(entity_type) == mapset.end()) {
+      // No field for this entity_type in the map.
+      return 0;
+    }
+    const std::set<std::string> &entity_set = mapset.at(entity_type);
+    if (entity_set.find(field_name) != entity_set.end()) {
+      return 1;
+    }
+    return 0;
+  }
+
+  void DatabaseIO::put_field_internal(const std::string &entity_type,
+                                      const std::string &entity_name, const Ioss::Field &field,
+                                      void *data, size_t data_size) const
+  {
+    const std::string &field_name = field.get_name();
+    if (find_field_in_mapset(entity_type, field_name, ignore_fields)) {
+      return;
+    }
     size_t num_to_get = field.verify(data_size); // Compare to size reserved in io variable instead?
     Ioss::Field::RoleType role = field.get_role();
 
-    adios2::IO bpio = ad->AtIO("writer");
-    // for (auto const& pairName : entityNames) {
-    std::string encoded_name = entityNames.at(std::make_pair(field.get_name(), type_string));
+    adios2::IO  bpio         = ad->AtIO("writer");
+    std::string encoded_name = encode_field_name(entity_type, entity_name, field_name);
 
     switch (field.get_type()) {
     case Ioss::Field::BasicType::DOUBLE: put_data<double>(bpio, field, data, encoded_name); break;
@@ -323,182 +390,329 @@ namespace Ioad {
   int64_t DatabaseIO::put_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(eb->type_string(), field, data, data_size);
+    put_field_internal(eb->type_string(), eb->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(eb->type_string(), field, data, data_size);
+    put_field_internal(eb->type_string(), eb->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(fb->type_string(), field, data, data_size);
+    put_field_internal(fb->type_string(), fb->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(sb->type_string(), field, data, data_size);
+    put_field_internal(sb->type_string(), sb->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(ns->type_string(), field, data, data_size);
+    put_field_internal(ns->type_string(), ns->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(es->type_string(), field, data, data_size);
+    put_field_internal(es->type_string(), es->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(fs->type_string(), field, data, data_size);
+    put_field_internal(fs->type_string(), fs->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(es->type_string(), field, data, data_size);
+    put_field_internal(es->type_string(), es->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(ss->type_string(), field, data, data_size);
+    put_field_internal(ss->type_string(), ss->name(), field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    put_field_internal(cs->type_string(), field, data, data_size);
+    put_field_internal(cs->type_string(), cs->name(), field, data, data_size);
+  }
+
+  // template<typename T>
+  // create_nodeblock(std::string block_name, std::vector<typename adios2::Variable<T>::Info>
+  // blocks)
+  // {
+  // // Check number of nodeblocks/ids==1
+  // // Create nodeblock
+  // // Load data
+  // // Load other nodeblock fields
+  // }
+
+  void DatabaseIO::add_attribute_fields(
+      Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
+      std::map<std::string, std::pair<std::string, std::string>> field_names)
+  {
+    // Does not verify if name is correct based on IOSS requirements. Assumes that it is the case.
+    size_t my_element_count = block->entity_count();
+
+    // std::vector<Ioss::Field> attributes;
+    // Ioss::Utils::get_fields(my_element_count, field_names, Ioss::Field::ATTRIBUTE,
+    //                             get_field_recognition(), field_suffix_separator, nullptr,
+    //                             attributes);
+    //     int offset = 1;
+    //     for (const auto &field : attributes) {
+    //       if (block->field_exists(field.get_name())) {
+    //         std::ostringstream errmsg;
+    //         errmsg << "ERROR: In block '" << block->name() << "', attribute '" <<
+    //         field.get_name()
+    //                << "' is defined multiple times which is not allowed.\n";
+    //         IOSS_ERROR(errmsg);
+    //       }
+    //       block->field_add(field);
+    //       const Ioss::Field &tmp_field = block->get_fieldref(field.get_name());
+    //       tmp_field.set_index(offset);
+    //       offset += field.raw_storage()->component_count();
+    //     }
+  }
+
+  // common
+  void DatabaseIO::get_nodeblocks(
+      adios2::IO &reader_io, const VariableMapType &variables_map)
+  {
+    // For exodusII, there is only a single node block which contains
+    // all of the nodes.
+    // The default id assigned is '1' and the name is 'nodeblock_1'
+    std::string entity_name = "NodeBlock";
+    const std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>
+        &       entity_map = variables_map.at(entity_name);
+    std::string block_name    = "nodeblock_1";
+    // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
+    std::string coord_name    = "mesh_model_coordinates";
+    if (entity_map.find(block_name) == entity_map.end() ||
+        entity_map.at(block_name).find(coord_name) == entity_map.at(block_name).end() ||
+        entity_map.at(block_name).at(coord_name).second != adios2::helper::GetType<int>()) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: block name nodeblock_1 not found or does not contain `"<< coord_name <<"` field.\n";
+      IOSS_ERROR(errmsg);
+    }
+    // Get `node_count` and `spatialDimension`.
+    std::string coord_var_name = encode_field_name(entity_name, block_name, coord_name);
+    std::vector<size_t> steps;
+    std::pair<size_t, size_t> node_boundaries;
+    Ioss::Field::RoleType role;
+    std::tie(steps, node_boundaries, spatialDimension, role) = get_variable_infos<int>(reader_io, coord_var_name);
+    if (!spatialDimension) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Variable `" << coord_var_name
+             << "` in BP file without any dimension information.\n";
+      IOSS_ERROR(errmsg);
+    }
+    auto block        = new Ioss::NodeBlock(this, block_name, node_boundaries.second, spatialDimension);
+    block->property_add(Ioss::Property("id", 1));
+    block->property_add(Ioss::Property("guid", util().generate_guid(1)));
+    // Check for results variables.
+
+    // int num_attr = 0;
+    // {
+    //   Ioss::SerializeIO serializeIO__(this);
+    //   int               ierr = ex_get_attr_param(get_file_pointer(), EX_NODE_BLOCK, 1,
+    //   &num_attr); if (ierr < 0) {
+    //     Ioex::exodus_error(get_file_pointer(), __LINE__, __func__, __FILE__);
+    //   }
+    // }
+    //    add_attribute_fields(block, size, variables[block_name]);
+    // add_attribute_fields(EX_NODE_BLOCK, block, num_attr, "");
+    // add_results_fields(EX_NODE_BLOCK, block);
+
+    bool added = get_region()->add(block);
+    if (!added) {
+      delete block;
+    }
+    // Load all fields listed in variables_map
+    
   }
 
   template <typename T>
-  void DatabaseIO::read_variable_size(adios2::IO &bpio, std::pair<std::string, std::map<std::string, std::string>> vpair)
+  DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos(adios2::IO &       bpio,
+                                                                      const std::string &var_name)
   {
-    auto v = bpio.InquireVariable<T>(vpair.first);
-     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks = bp_engine.AllStepsBlocksInfo(v);
-    if (!allblocks.empty()) {
-      size_t ndim = v.Shape().size();
-      /*Only query the block size of the current process based on the process rank.*/
-      if (ndim == 0) {
-        exit(0); /*not handled. Crash to not forget that it has to be improved.*/
-      }
-      else {
-        size_t laststep = allblocks.rbegin()->first;
-        size_t ndim     = v.Shape().size();
-        for (auto &blockpair : allblocks) {
-          size_t                                  step   = blockpair.first;
-          std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
-          std::cout << "step: " << step << std::endl;
-          std::cout << "block:" << std::endl;
-          for (size_t j = 0; j < blocks.size(); j++) {
-            for (size_t k = 0; k < ndim; k++) {
-              if (blocks[j].Count[k]) {
-                std::cout << "!" << blocks[j].Start[k] << ":"
-                          << blocks[j].Start[k] + blocks[j].Count[k] - 1;
-              }
-              else {
-                exit(0); /*Not handled*/
-              }
-              if (k < ndim - 1)
-                std::cout << " - ";
-            }
-            std::cout << std::endl;
-          }
-        }
-      }
-    }
-  }
+    std::string entity_type, entity_name, field_name;
+    std::tie(entity_type, entity_name, field_name) = decode_field_name(var_name);
 
-  void DatabaseIO::read_region(adios2::IO &bpio)
-  {
-
-    // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = bpio.InquireAttribute<unsigned int>(schema_version_string);
-    if (!schema_version) {
+    auto   v    = bpio.InquireVariable<T>(var_name);
+    size_t ndim = v.Shape().size();
+    if (ndim != 3) {
       std::ostringstream errmsg;
-      errmsg << "INTERNAL ERROR: schema_version_string not found. "
-             << "Something is wrong in the Ioad::DatabaseIO::read_region() function. "
-             << "Please check input file.\n";
+      errmsg << "ERROR: BP variable dimension should be 3.\n";
       IOSS_ERROR(errmsg);
     }
-    // Fow now, we do not do anything special based on the schema version. It is only used to check
-    // that the input file is in the expected format.
-
-    const std::map<std::string, std::map<std::string, std::string>> variables = bpio.AvailableVariables();
-
-    for (const auto &vpair : variables) {
-      const std::string &name = vpair.first;
-      std::cout << "name:" << name << std::endl;
-      // for (const auto &key : vpair.second) {
-      // std::cout << "key:" << key.first << std::endl;
-      // }
-      std::cout << "type:" << vpair.second.at("Type") << std::endl;
-      std::cout << "shape:" << vpair.second.at("Shape") << std::endl;
-      std::cout << "step counts:" << vpair.second.at("AvailableStepsCount") << std::endl;
-
-      // Simply to start the "else if" section with "if".
-      if (vpair.second.at("Type") == "not supported") {
-      }
-#define declare_template_instantiation(T)                             \
-  else if (vpair.second.at("Type") == adios2::helper::GetType<T>()) { \
-      /*read_variable_size<T>(bpio, vpair);*/                                           \
-      }
-      ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
-#undef declare_template_instantiation
-
-    // Once everything is loaded, get global variables such as spatialDimension.
+    // For non-transient variables, not all blocks need to be loaded. Might improve speed.
+    std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
+        bp_engine.AllStepsBlocksInfo(v);
+    if (allblocks.empty()) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Empty BP variable\n";
+      IOSS_ERROR(errmsg);
     }
+    size_t laststep = allblocks.rbegin()->first;
+    // Only transient fields can have steps.
+    adios2::Attribute<int> role_attr = bpio.InquireAttribute<int>(role_attribute, var_name, attribute_separator);
+    Ioss::Field::RoleType role = static_cast<Ioss::Field::RoleType>(role_attr.Data()[0]);
+    if (role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Last step should be 0 for non-transient fields. "
+             << "Something is wrong in the Ioad::DatabaseIO::get_variable_size() function.\n";
+      IOSS_ERROR(errmsg);
+    }
+    std::pair<size_t, size_t> node_boundaries;
+    size_t component_count = 0;
+    std::vector<size_t> steps;
+    bool first = true;
+    for (auto &blockpair : allblocks) {
+      std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
+      // Sanity checks
+      if (blocks[rank].Start[2] != 0) {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Number of components should always start at 0.\n";
+        IOSS_ERROR(errmsg);
+      }
+      if (!blocks[rank].Count[0] || !blocks[rank].Count[1] || !blocks[rank].Count[2]) {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Block information does not contain Count.\n";
+        IOSS_ERROR(errmsg);
+      }
+      // Only query the block size of the current process based on the process rank.
+      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count of
+      // node count for this variable. Dimension=2 encodes the number of components for this
+      // variables, and should always start at 0;
+      size_t block_component_count = blocks[rank].Count[2];
+      std::pair<size_t, size_t> block_node_boundaries = std::make_pair(blocks[rank].Start[1], blocks[rank].Count[1]);
+      if(first) {
+        node_boundaries = block_node_boundaries;
+        component_count = block_component_count;
+      }
+      else if(block_node_boundaries != node_boundaries || block_component_count != component_count) {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
+        IOSS_ERROR(errmsg);
+      }
+      // Steps
+      steps.push_back(blockpair.first);
+    }
+    return std::make_tuple(steps, node_boundaries, component_count, role);
   }
 
-  void DatabaseIO::read_meta_data__()
-  {
-    adios2::IO reader_io = ad->AtIO("reader");
-    read_region(reader_io);
-    // read_communication_metadata();
 
-    // get_step_times__();
+//   void DatabaseIO::read_region(adios2::IO &bpio)
+//   {
 
-    // get_nodeblocks();
-    // get_edgeblocks();
-    // get_faceblocks();
-    // get_elemblocks();
+//     // Only get schema version attribute as it is the only one we expect.
+//     auto schema_version = bpio.InquireAttribute<unsigned int>(schema_version_string);
+//     if (!schema_version) {
+//       std::ostringstream errmsg;
+//       errmsg << "INTERNAL ERROR: schema_version_string not found. "
+//              << "Something is wrong in the Ioad::DatabaseIO::read_region() function. "
+//              << "Please check input file.\n";
+//       IOSS_ERROR(errmsg);
+//     }
+//     // Fow now, we do not do anything special based on the schema version. It is only used to
+//     check
+//     // that the input file is in the expected format.
 
-    // check_side_topology();
+//     for (const auto &vpair : variables) {
+//       const std::string &name = vpair.first;
+//       std::cout << "name:" << name << std::endl;
 
-    // get_sidesets();
-    // get_nodesets();
-    // get_edgesets();
-    // get_facesets();
-    // get_elemsets();
+//       std::cout << "type:" << vpair.second.at("Type") << std::endl;
+//       std::cout << "shape:" << vpair.second.at("Shape") << std::endl;
+//       std::cout << "step counts:" << vpair.second.at("AvailableStepsCount") << std::endl;
 
-    // get_commsets();
+//       // Simply to start the "else if" section with "if".
+//       if (vpair.second.at("Type") == "not supported") {
+//       }
+// #define declare_template_instantiation(T)                             \
+//   else if (vpair.second.at("Type") == adios2::helper::GetType<T>()) { \
+//       read_variable_size<T>(bpio, vpair);                             \
+//       }
+//       ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
+// #undef declare_template_instantiation
+//     std::cout<<"vvvvvvvvvvvvvvvv"<<std::endl;
+//     // Once everything is loaded, get global variables such as spatialDimension.
+//     }
+//   }
 
-    // handle_groups();
-
-    // add_region_fields();
-
-    // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
-    //   get_map(EX_NODE_BLOCK);
-    //   get_map(EX_EDGE_BLOCK);
-    //   get_map(EX_FACE_BLOCK);
-    //   get_map(EX_ELEM_BLOCK);
-    // }
+void DatabaseIO::read_meta_data__()
+{
+  adios2::IO reader_io = ad->AtIO("reader");
+  // Only get schema version attribute as it is the only one we expect.
+  auto schema_version = reader_io.InquireAttribute<unsigned int>(schema_version_string);
+  if (!schema_version) {
+    std::ostringstream errmsg;
+    errmsg << "ERROR: schema_version_string not found.\n";
+    IOSS_ERROR(errmsg);
+  }
+  // Get all variables
+  VariableMapType variables_map;
+  
+  const std::map<std::string, std::map<std::string, std::string>> variables =
+      reader_io.AvailableVariables();
+  std::string entity_type, entity_name, field_name;
+  for (const auto &vpair : variables) {
+    const std::string &name                        = vpair.first;
+    std::tie(entity_type, entity_name, field_name) = decode_field_name(name);
+    // We know this set of keys is unique as it is decoded from the variable name
+    // and two varaibles cannot have the same name.
+    variables_map[entity_type][entity_name][field_name] =
+        std::make_pair(name, vpair.second.at("Type"));
   }
 
-  // int64_t DatabaseIO::put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field
-  // &field,
-  //                                        void *data, size_t data_size) const
-  // {
-  //   put_field_internal(sb->type_string(), field, data, data_size);
+  // read_region(reader_io);
+  std::cout << "======================================" << std::endl;
+  // read_communication_metadata();
+
+  // get_step_times__();
+  get_nodeblocks(reader_io, variables_map);
+  // get_nodeblocks();
+  // get_edgeblocks();
+  // get_faceblocks();
+  // get_elemblocks();
+
+  // check_side_topology();
+
+  // get_sidesets();
+  // get_nodesets();
+  // get_edgesets();
+  // get_facesets();
+  // get_elemsets();
+
+  // get_commsets();
+
+  // handle_groups();
+
+  // add_region_fields();
+
+  // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
+  //   get_map(EX_NODE_BLOCK);
+  //   get_map(EX_EDGE_BLOCK);
+  //   get_map(EX_FACE_BLOCK);
+  //   get_map(EX_ELEM_BLOCK);
   // }
+}
+
+// int64_t DatabaseIO::put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field
+// &field,
+//                                        void *data, size_t data_size) const
+// {
+//   put_field_internal(sb->type_string(), field, data, data_size);
+// }
 
 } // namespace Ioad
