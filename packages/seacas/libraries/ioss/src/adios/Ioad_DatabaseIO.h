@@ -39,6 +39,8 @@
 
 #include <adios2.h>
 #include <set>
+#include "Ioss_Field.h"           // for Field, etc
+
 
 namespace Ioss {
   class GroupingEntity;
@@ -55,6 +57,28 @@ namespace Ioss {
 /** \brief A namespace for the adios database format.
  */
 namespace Ioad {
+
+struct BlockInfoType
+{
+  std::vector<size_t> steps;
+  std::pair<size_t, size_t> node_boundaries;
+  size_t component_count = {0};
+  Ioss::Field::RoleType role;
+  std::string variable_type;
+  Ioss::BasicType basic_type;
+};
+
+template<>
+template_to_basic_type<double>()
+{
+  return Ioss::BasicType::DOUBLE;
+}
+
+template<typename T>
+template_to_basic_type<T>()
+{
+  return Ioss::BasicType::INVALID;
+}
 
   class DatabaseIO : public Ioss::DatabaseIO
   {
@@ -178,13 +202,13 @@ namespace Ioad {
 
     template <typename T>
     void put_data(adios2::IO &bpio, const Ioss::Field &field, void *data,
-                  const std::string &encoded_name) const;
+                  const std::string &encoded_name, bool transformed_field) const;
     template <typename T>
     void                       define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
                                                      const std::string &encoded_name);
     template <typename T> void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
 
-    using BlockInfoType = std::tuple<std::vector<size_t>, std::pair<size_t, size_t>, size_t, Ioss::Field::RoleType>;
+    bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
 
     template <typename T>
     BlockInfoType get_variable_infos(adios2::IO &       bpio,
@@ -196,8 +220,8 @@ namespace Ioad {
     using VariableMapType = std::map<std::string, std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>>;
     void get_nodeblocks(adios2::IO &reader_io, const VariableMapType &variables);
     void
-    add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
-                         std::map<std::string, std::pair<std::string, std::string>> field_names);
+    // add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
+    //                      std::map<std::string, std::pair<std::string, std::string>> field_names);
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name, const std::map<std::string, std::set<std::string>> &mapset) const;
 
@@ -212,7 +236,8 @@ namespace Ioad {
     const std::string                                  name_separator         = "/";
     const std::string                                  attribute_separator    = "::";
     const std::string                                  role_attribute         = "role";
-    const std::map<std::string, std::set<std::string>> use_transformed_storage = {
+    const std::string                                  var_type_attribute     = "var_type";
+    const std::map<std::string, std::set<std::string>> use_transformed_storage_map = {
         {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
         {"FaceBlock", {"connectivity_edge"}}};
     const std::map<std::string, std::set<std::string>> ignore_fields = {

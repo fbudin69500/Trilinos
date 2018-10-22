@@ -40,7 +40,6 @@
 #include "Ioss_EntityType.h"      // for EntityType::ELEMENTBLOCK
 #include "Ioss_FaceBlock.h"       // for FaceBlock
 #include "Ioss_FaceSet.h"         // for FaceSet
-#include "Ioss_Field.h"           // for Field, etc
 #include "Ioss_FileInfo.h"        // for FileInfo
 #include "Ioss_GroupingEntity.h"  // for GroupingEntity
 #include "Ioss_Map.h"             // for Map, MapContainer
@@ -150,6 +149,15 @@ namespace Ioad {
     return true;
   }
 
+  bool DatabaseIO::use_transformed_storage(const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const
+  {
+    if (field.get_role() == Ioss::Field::RoleType::TRANSIENT ||
+        find_field_in_mapset(entity_type, field_name, use_transformed_storage_map)) {
+          return true;
+      }
+    return false;
+  }
+
   template <typename T>
   void DatabaseIO::define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
                                          const std::string &encoded_name)
@@ -161,8 +169,7 @@ namespace Ioad {
     if (find_field_in_mapset(entity_type, field_name, ignore_fields)) {
       return;
     }
-    if (field.get_role() == Ioss::Field::RoleType::TRANSIENT ||
-        find_field_in_mapset(entity_type, field_name, use_transformed_storage)) {
+    if (use_transformed_storage(field, entity_type, field_name)) {
       component_count = field.transformed_storage()->component_count();
       local_size      = field.transformed_count();
     }
@@ -218,6 +225,7 @@ namespace Ioad {
         auto        field        = entity_block->get_fieldref(field_name);
         std::string encoded_name = encode_field_name(entity_type, entity_name, field_name);
         switch (field.get_type()) {
+        case Ioss::Field::BasicType::REAL:
         case Ioss::Field::BasicType::DOUBLE:
           define_model_internal<double>(bpio, field, encoded_name);
           break;
@@ -316,7 +324,7 @@ namespace Ioad {
 
   template <typename T>
   void DatabaseIO::put_data(adios2::IO &bpio, const Ioss::Field &field, void *data,
-                            const std::string &encoded_name) const
+                            const std::string &encoded_name, bool transformed_field) const
   {
     adios2::Variable<T> entities = bpio.InquireVariable<T>(encoded_name);
     if (entities) {
@@ -327,6 +335,14 @@ namespace Ioad {
       // fields that are not saved.
       bpio.DefineAttribute<int>(role_attribute, field.get_role(), encoded_name,
                                 attribute_separator);
+      if(transformed_field) {
+        bpio.DefineAttribute<std::string>(var_type_attribute, field.transformed_storage()->name(), encoded_name,
+                                  attribute_separator);
+      }
+      else {
+        bpio.DefineAttribute<std::string>(var_type_attribute, field.raw_storage()->name(), encoded_name,
+                                  attribute_separator);
+      }
     }
   }
 
@@ -368,15 +384,16 @@ namespace Ioad {
 
     adios2::IO  bpio         = ad->AtIO("writer");
     std::string encoded_name = encode_field_name(entity_type, entity_name, field_name);
+    bool transformed_field = use_transformed_storage(field, entity_name, field_name);
 
     switch (field.get_type()) {
-    case Ioss::Field::BasicType::DOUBLE: put_data<double>(bpio, field, data, encoded_name); break;
-    case Ioss::Field::BasicType::INT32: put_data<int32_t>(bpio, field, data, encoded_name); break;
-    case Ioss::Field::BasicType::INT64: put_data<int64_t>(bpio, field, data, encoded_name); break;
-    case Ioss::Field::BasicType::COMPLEX: put_data<Complex>(bpio, field, data, encoded_name); break;
-    case Ioss::Field::BasicType::CHARACTER: put_data<char>(bpio, field, data, encoded_name); break;
+    case Ioss::Field::BasicType::DOUBLE: put_data<double>(bpio, field, data, encoded_name, transformed_field); break;
+    case Ioss::Field::BasicType::INT32: put_data<int32_t>(bpio, field, data, encoded_name, transformed_field); break;
+    case Ioss::Field::BasicType::INT64: put_data<int64_t>(bpio, field, data, encoded_name, transformed_field); break;
+    case Ioss::Field::BasicType::COMPLEX: put_data<Complex>(bpio, field, data, encoded_name, transformed_field); break;
+    case Ioss::Field::BasicType::CHARACTER: put_data<char>(bpio, field, data, encoded_name, transformed_field); break;
     case Ioss::Field::BasicType::STRING:
-      put_data<std::string>(bpio, field, data, encoded_name);
+      put_data<std::string>(bpio, field, data, encoded_name, transformed_field);
       break;
     default:
       std::ostringstream errmsg;
@@ -457,36 +474,92 @@ namespace Ioad {
   // // Load other nodeblock fields
   // }
 
-  void DatabaseIO::add_attribute_fields(
-      Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
-      std::map<std::string, std::pair<std::string, std::string>> field_names)
-  {
-    // Does not verify if name is correct based on IOSS requirements. Assumes that it is the case.
-    size_t my_element_count = block->entity_count();
+  // void DatabaseIO::add_attribute_fields(
+  //     Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
+  //     std::map<std::string, std::pair<std::string, std::string>> field_names)
+  // {
+  //   // Does not verify if name is correct based on IOSS requirements. Assumes that it is the case.
+  //   size_t my_element_count = block->entity_count();
 
-    // std::vector<Ioss::Field> attributes;
-    // Ioss::Utils::get_fields(my_element_count, field_names, Ioss::Field::ATTRIBUTE,
-    //                             get_field_recognition(), field_suffix_separator, nullptr,
-    //                             attributes);
-    //     int offset = 1;
-    //     for (const auto &field : attributes) {
-    //       if (block->field_exists(field.get_name())) {
-    //         std::ostringstream errmsg;
-    //         errmsg << "ERROR: In block '" << block->name() << "', attribute '" <<
-    //         field.get_name()
-    //                << "' is defined multiple times which is not allowed.\n";
-    //         IOSS_ERROR(errmsg);
-    //       }
-    //       block->field_add(field);
-    //       const Ioss::Field &tmp_field = block->get_fieldref(field.get_name());
-    //       tmp_field.set_index(offset);
-    //       offset += field.raw_storage()->component_count();
-    //     }
+  //   // std::vector<Ioss::Field> attributes;
+  //   // Ioss::Utils::get_fields(my_element_count, field_names, Ioss::Field::ATTRIBUTE,
+  //   //                             get_field_recognition(), field_suffix_separator, nullptr,
+  //   //                             attributes);
+  //   //     int offset = 1;
+  //   //     for (const auto &field : attributes) {
+  //   //       if (block->field_exists(field.get_name())) {
+  //   //         std::ostringstream errmsg;
+  //   //         errmsg << "ERROR: In block '" << block->name() << "', attribute '" <<
+  //   //         field.get_name()
+  //   //                << "' is defined multiple times which is not allowed.\n";
+  //   //         IOSS_ERROR(errmsg);
+  //   //       }
+  //   //       block->field_add(field);
+  //   //       const Ioss::Field &tmp_field = block->get_fieldref(field.get_name());
+  //   //       tmp_field.set_index(offset);
+  //   //       offset += field.raw_storage()->component_count();
+  //   //     }
+  // }
+
+  void DatabaseIO::get_variable_infos_from_map(adios2::IO &           bpio,
+                                               const VariableMapType &variables_map,
+                                               const std::string &    block_name,
+                                               const std::string &    entity_name,
+                                               const std::string &    var_name)
+  {
+    // No check to verify that the block_name, entity_name, variable_name, and type exist as they
+    // have been extracted earlier from the file and everything should still be up to date.
+    if (entity_map.find(block_name) == entity_map.end()) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: block name " << block_name << " not found.\n";
+      IOSS_ERROR(errmsg);
+    }
+
+    if (entity_map.at(block_name).find(var_name) == entity_map.at(var_name).end() ||
+        entity_map.at(block_name).at(var_name).second != adios2::helper::GetType<int>()) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: block name " << block_name << " not found or does not contain `" << var_name
+             << "` field.\n";
+      IOSS_ERROR(errmsg);
+    }
+    return get_variable_infos_from_map_no_check(bpio, variables_map, block_name, entity_name,
+                                                var_name);
+  }
+
+  BlockInfoType DatabaseIO::get_variable_infos_from_map_no_check(
+      adios2::IO &bpio, const VariableMapType &variables_map, const std::string &block_name,
+      const std::string &entity_name, const std::string &var_name)
+  {
+    std::string               variable = encode_field_name(entity_name, block_name, var_name);
+    std::vector<size_t>       steps;
+    std::pair<size_t, size_t> node_boundaries;
+    Ioss::Field::RoleType     role;
+    std::string               type = variables_map[entity_name][block_name][var_name];
+    // Simply to start the "else if" section with "if".
+    if (type == "not supported") {
+    }
+#define declare_template_instantiation(T)                                                          \
+  else if (type == adios2::helper::GetType<T>())                                                   \
+  {                                                                                                \
+    std::tie(steps, node_boundaries, component_count, role) =                                      \
+        get_variable_infos<int>(reader_io, variable);                                              \
+  }
+    ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
+#undef declare_template_instantiation
+    else
+    {
+      std::ostringstream errmsg;
+      errmsg << "INTERNAL ERROR: Invalid variable type. "
+             << "Something is wrong in the "
+                "Ioad::DatabaseIO::get_variable_infos_from_map_no_check() function. "
+             << "Please report.\n";
+      IOSS_ERROR(errmsg);
+    }
+    return std::make_tuple(steps, node_boundaries, component_count, role);
   }
 
   // common
-  void DatabaseIO::get_nodeblocks(
-      adios2::IO &reader_io, const VariableMapType &variables_map)
+  void DatabaseIO::get_nodeblocks(adios2::IO &reader_io, const VariableMapType &variables_map)
   {
     // For exodusII, there is only a single node block which contains
     // all of the nodes.
@@ -494,123 +567,136 @@ namespace Ioad {
     std::string entity_name = "NodeBlock";
     const std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>
         &       entity_map = variables_map.at(entity_name);
-    std::string block_name    = "nodeblock_1";
+    std::string block_name = "nodeblock_1";
+
     // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
-    std::string coord_name    = "mesh_model_coordinates";
-    if (entity_map.find(block_name) == entity_map.end() ||
-        entity_map.at(block_name).find(coord_name) == entity_map.at(block_name).end() ||
-        entity_map.at(block_name).at(coord_name).second != adios2::helper::GetType<int>()) {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: block name nodeblock_1 not found or does not contain `"<< coord_name <<"` field.\n";
-      IOSS_ERROR(errmsg);
-    }
+    std::string coord_var_name = "mesh_model_coordinates";
     // Get `node_count` and `spatialDimension`.
-    std::string coord_var_name = encode_field_name(entity_name, block_name, coord_name);
-    std::vector<size_t> steps;
-    std::pair<size_t, size_t> node_boundaries;
-    Ioss::Field::RoleType role;
-    std::tie(steps, node_boundaries, spatialDimension, role) = get_variable_infos<int>(reader_io, coord_var_name);
+    BlockInfoType model_coordinates_infos = get_variable_infos_from_map(entity_name, block_name, coord_var_name);
+    spatialDimension = model_coordinates_infos.component_count;
     if (!spatialDimension) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Variable `" << coord_var_name
              << "` in BP file without any dimension information.\n";
       IOSS_ERROR(errmsg);
     }
-    auto block        = new Ioss::NodeBlock(this, block_name, node_boundaries.second, spatialDimension);
+    auto block = new Ioss::NodeBlock(this, block_name, node_boundaries.second, spatialDimension);
     block->property_add(Ioss::Property("id", 1));
     block->property_add(Ioss::Property("guid", util().generate_guid(1)));
-    // Check for results variables.
 
-    // int num_attr = 0;
-    // {
-    //   Ioss::SerializeIO serializeIO__(this);
-    //   int               ierr = ex_get_attr_param(get_file_pointer(), EX_NODE_BLOCK, 1,
-    //   &num_attr); if (ierr < 0) {
-    //     Ioex::exodus_error(get_file_pointer(), __LINE__, __func__, __FILE__);
-    //   }
-    // }
-    //    add_attribute_fields(block, size, variables[block_name]);
-    // add_attribute_fields(EX_NODE_BLOCK, block, num_attr, "");
-    // add_results_fields(EX_NODE_BLOCK, block);
-
+    for (auto &variable : entity_map[block_name]) {
+      if (block->field_exists(variable.first)) {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: In block '" << block->name() << "', attribute '" << variable.first
+                << "' is defined multiple times which is not allowed.\n";
+        IOSS_ERROR(errmsg);
+      }
+      BlockInfoType variable_infos = get_variable_infos_from_map_no_check(bpio, variables_map, block_name, entity_name, variable.first)
+      Ioss::Field field(variable.first, variable_infos.basic_type, variable_infos.variable_type, variable_type.role, variable_type.component_count);
+      block->field_add(field);
+      // TODO: Add offset?????
+    }
     bool added = get_region()->add(block);
     if (!added) {
       delete block;
-    }
-    // Load all fields listed in variables_map
-    
+  }
+  // Check for results variables.
+
+//   // int num_attr = 0;
+//   // {
+//   //   Ioss::SerializeIO serializeIO__(this);
+//   //   int               ierr = ex_get_attr_param(get_file_pointer(), EX_NODE_BLOCK, 1,
+//   //   &num_attr); if (ierr < 0) {
+//   //     Ioex::exodus_error(get_file_pointer(), __LINE__, __func__, __FILE__);
+//   //   }
+//   // }
+//   //    add_attribute_fields(block, size, variables[block_name]);
+//   // add_attribute_fields(EX_NODE_BLOCK, block, num_attr, "");
+//   // add_results_fields(EX_NODE_BLOCK, block);
+
+//   bool added = get_region()->add(block);
+//   if (!added) {
+//     delete block;
+//   }
+//   // Load all fields listed in variables_map
+// } // namespace Ioad
+
+template <typename T>
+DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos(adios2::IO &       bpio,
+                                                         const std::string &var_name)
+{
+  BlockInfoType infos;
+  std::string entity_type, entity_name, field_name;
+  std::tie(entity_type, entity_name, field_name) = decode_field_name(var_name);
+
+  auto   v    = bpio.InquireVariable<T>(var_name);
+  size_t ndim = v.Shape().size();
+  if (ndim != 3) {
+    std::ostringstream errmsg;
+    errmsg << "ERROR: BP variable dimension should be 3.\n";
+    IOSS_ERROR(errmsg);
+  }
+  // For non-transient variables, not all blocks need to be loaded. Might improve speed.
+  std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
+      bp_engine.AllStepsBlocksInfo(v);
+  if (allblocks.empty()) {
+    std::ostringstream errmsg;
+    errmsg << "ERROR: Empty BP variable\n";
+    IOSS_ERROR(errmsg);
+  }
+  size_t laststep = allblocks.rbegin()->first;
+  // Only transient fields can have steps.
+  adios2::Attribute<int> role_attr =
+      bpio.InquireAttribute<int>(role_attribute, var_name, attribute_separator);
+  infos.role = static_cast<Ioss::Field::RoleType>(role_attr.Data()[0]);
+  if (infos.role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
+    std::ostringstream errmsg;
+    errmsg << "ERROR: Last step should be 0 for non-transient fields. "
+           << "Something is wrong in the Ioad::DatabaseIO::get_variable_size() function.\n";
+    IOSS_ERROR(errmsg);
   }
 
-  template <typename T>
-  DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos(adios2::IO &       bpio,
-                                                                      const std::string &var_name)
-  {
-    std::string entity_type, entity_name, field_name;
-    std::tie(entity_type, entity_name, field_name) = decode_field_name(var_name);
+  // Get VariableType
+  adios2::Attribute<std::string> var_type_attr =
+  bpio.InquireAttribute<std::string>(type_attribute, var_name, attribute_separator);
+  infos.variable_type = var_type_attr.Data()[0];
 
-    auto   v    = bpio.InquireVariable<T>(var_name);
-    size_t ndim = v.Shape().size();
-    if (ndim != 3) {
+  bool                      first = true;
+  for (auto &blockpair : allblocks) {
+    std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
+    // Sanity checks
+    if (blocks[rank].Start[2] != 0) {
       std::ostringstream errmsg;
-      errmsg << "ERROR: BP variable dimension should be 3.\n";
+      errmsg << "ERROR: Number of components should always start at 0.\n";
       IOSS_ERROR(errmsg);
     }
-    // For non-transient variables, not all blocks need to be loaded. Might improve speed.
-    std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
-        bp_engine.AllStepsBlocksInfo(v);
-    if (allblocks.empty()) {
+    if (!blocks[rank].Count[0] || !blocks[rank].Count[1] || !blocks[rank].Count[2]) {
       std::ostringstream errmsg;
-      errmsg << "ERROR: Empty BP variable\n";
+      errmsg << "ERROR: Block information does not contain Count.\n";
       IOSS_ERROR(errmsg);
     }
-    size_t laststep = allblocks.rbegin()->first;
-    // Only transient fields can have steps.
-    adios2::Attribute<int> role_attr = bpio.InquireAttribute<int>(role_attribute, var_name, attribute_separator);
-    Ioss::Field::RoleType role = static_cast<Ioss::Field::RoleType>(role_attr.Data()[0]);
-    if (role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
+    // Only query the block size of the current process based on the process rank.
+    // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count of
+    // node count for this variable. Dimension=2 encodes the number of components for this
+    // variables, and should always start at 0;
+    size_t                    block_component_count = blocks[rank].Count[2];
+    std::pair<size_t, size_t> block_node_boundaries =
+        std::make_pair(blocks[rank].Start[1], blocks[rank].Count[1]);
+    if (first) {
+      infos.node_boundaries = block_node_boundaries;
+      infos.component_count = block_component_count;
+    }
+    else if (block_node_boundaries != infos.node_boundaries || block_component_count != infos.component_count) {
       std::ostringstream errmsg;
-      errmsg << "ERROR: Last step should be 0 for non-transient fields. "
-             << "Something is wrong in the Ioad::DatabaseIO::get_variable_size() function.\n";
+      errmsg << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
       IOSS_ERROR(errmsg);
     }
-    std::pair<size_t, size_t> node_boundaries;
-    size_t component_count = 0;
-    std::vector<size_t> steps;
-    bool first = true;
-    for (auto &blockpair : allblocks) {
-      std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
-      // Sanity checks
-      if (blocks[rank].Start[2] != 0) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Number of components should always start at 0.\n";
-        IOSS_ERROR(errmsg);
-      }
-      if (!blocks[rank].Count[0] || !blocks[rank].Count[1] || !blocks[rank].Count[2]) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Block information does not contain Count.\n";
-        IOSS_ERROR(errmsg);
-      }
-      // Only query the block size of the current process based on the process rank.
-      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count of
-      // node count for this variable. Dimension=2 encodes the number of components for this
-      // variables, and should always start at 0;
-      size_t block_component_count = blocks[rank].Count[2];
-      std::pair<size_t, size_t> block_node_boundaries = std::make_pair(blocks[rank].Start[1], blocks[rank].Count[1]);
-      if(first) {
-        node_boundaries = block_node_boundaries;
-        component_count = block_component_count;
-      }
-      else if(block_node_boundaries != node_boundaries || block_component_count != component_count) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
-        IOSS_ERROR(errmsg);
-      }
-      // Steps
-      steps.push_back(blockpair.first);
-    }
-    return std::make_tuple(steps, node_boundaries, component_count, role);
+    // Steps
+    infos.steps.push_back(blockpair.first);
   }
-
+  infos.basic_type = template_to_basic_type<T>();
+  return infos;
+}
 
 //   void DatabaseIO::read_region(adios2::IO &bpio)
 //   {
@@ -662,7 +748,7 @@ void DatabaseIO::read_meta_data__()
   }
   // Get all variables
   VariableMapType variables_map;
-  
+
   const std::map<std::string, std::map<std::string, std::string>> variables =
       reader_io.AvailableVariables();
   std::string entity_type, entity_name, field_name;
@@ -680,8 +766,8 @@ void DatabaseIO::read_meta_data__()
   // read_communication_metadata();
 
   // get_step_times__();
-  get_nodeblocks(reader_io, variables_map);
-  // get_nodeblocks();
+  //get_nodeblocks(reader_io, variables_map);
+  get_nodeblocks();
   // get_edgeblocks();
   // get_faceblocks();
   // get_elemblocks();
