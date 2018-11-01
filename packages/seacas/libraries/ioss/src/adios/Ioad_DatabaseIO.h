@@ -114,7 +114,7 @@ namespace Ioad {
     int64_t get_field_internal(const std::string &entity_type, const std::string &entity_name,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     template <typename T>
-    int64_t get_data(adios2::IO &bpio, const Ioss::Field &field, void *data,
+    int64_t get_data(const Ioss::Field &field, void *data,
                      const std::string &encoded_name, size_t data_size) const;
 
     int64_t put_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
@@ -149,37 +149,36 @@ namespace Ioad {
     int64_t put_field_internal(const std::string &entity_type, const std::string &entity_name,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     void    read_meta_data__() override;
-    void    define_model();
+    void    define_model(Ioss::Field::RoleType *role = nullptr);
     // void read_region(adios2::IO & bpio);
 
     int64_t element_global_to_local__(int64_t global) const { return 0; }
     int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
 
     template <typename T>
-    int64_t put_data(adios2::IO &bpio, const Ioss::Field &field, void *data,
+    int64_t put_data(const Ioss::Field &field, void *data,
                      const std::string &encoded_name, bool transformed_field,
                      size_t data_size) const;
     template <typename T>
-    void                       define_model_internal(adios2::IO &bpio, const Ioss::Field &field,
+    void                       define_model_internal(const Ioss::Field &field,
                                                      const std::string &encoded_name);
-    template <typename T> void define_entity_internal(const T &entity_blocks, adios2::IO &bpio);
+    template <typename T> void define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role);
 
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
 
     template <typename T>
-    BlockInfoType get_variable_infos(adios2::IO &bpio, const std::string &var_name) const;
+    BlockInfoType get_variable_infos(const std::string &var_name) const;
     using EntityMapType =
         std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>;
     using VariableMapType = std::map<std::string, EntityMapType>;
 
     template <typename T>
-    BlockInfoType get_variable_infos_from_map(adios2::IO &bpio, const EntityMapType &variables_map,
+    BlockInfoType get_variable_infos_from_map(const EntityMapType &variables_map,
                                               const std::string &entity_name,
                                               const std::string &block_name,
                                               const std::string &var_name) const;
-    BlockInfoType get_variable_infos_from_map_no_check(adios2::IO &         bpio,
-                                                       const EntityMapType &variables_map,
+    BlockInfoType get_variable_infos_from_map_no_check(const EntityMapType &variables_map,
                                                        const std::string &  entity_name,
                                                        const std::string &  block_name,
                                                        const std::string &  var_name) const;
@@ -189,28 +188,62 @@ namespace Ioad {
     std::tuple<std::string, std::string, std::string>
     decode_field_name(const std::string &encoded_name) const;
 
-    void get_nodeblocks(adios2::IO &bpio, const VariableMapType &variables);
+    void get_nodeblocks(const VariableMapType &variables);
+
+    class ADIOSWrapper
+    {
+    public:
+      ADIOSWrapper(MPI_Comm communicator, const std::string &filename, bool is_input, unsigned long rank);
+      //ADIOSWrapper(const ADIOSWrapper&);
+      ADIOSWrapper(ADIOSWrapper&& wrapper);
+      ~ADIOSWrapper();
+      adios2::Engine &GetEngine();
+      adios2::IO &    GetIO();
+      void            BeginStep();
+      void            EndStep();
+      template <typename T>
+      void DefineMetaVariable(std::string meta_name, std::string variable_name);
+      template <typename T>
+      void PutMetaVariable(std::string meta_name, T value, std::string variable_name) const;
+      template <typename T>
+      T GetMetaVariable(std::string meta_name, std::string variable_name) const;
+      std::pair<std::string, std::string> decode_meta_name(std::string name) const;
+
+    private:
+      adios2::IO     IOInit() const;
+      adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
+      std::string    EncodeMetaVariable(std::string meta_name, std::string variable_name) const;
+
+      const std::string m_MetaSeparator = "::";
+      const std::string m_IOName        = "io";
+
+      const int                            m_Rank;
+      const std::unique_ptr<adios2::ADIOS> m_Adios;
+      const MPI_Comm                       m_Communicator;
+
+      adios2::IO             m_BPIO;
+      mutable adios2::Engine m_BPEngine;
+      bool                   m_OpenStep;
+    };
 
     // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
     // size,
     //                      std::map<std::string, std::pair<std::string, std::string>>
     //                      field_names);
+    int RankInit();
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;
-
-    //`ad` needs to be a pointer or a mutable to avoid the following errror:
-    // error: passing ‘const adios2::ADIOS’ as ‘this’ argument discards qualifiers
-    adios2::ADIOS *                                    ad;
+    unsigned long rank; // rank needs to be declared first to be initialized before ad_wrapper.
+    ADIOSWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio and bp_engine to be initialized first.
+    adios2::IO &bpio;
+    adios2::Engine &bp_engine;
     const std::string                                  schema_version_string = "IOSS_adios_version";
-    mutable adios2::Engine                             bp_engine;
     int                                                spatialDimension{0};
-    unsigned long                                      rank;
     unsigned long                                      number_proc;
     const std::string                                  name_separator              = "/";
-    const std::string                                  attribute_separator         = "::";
-    const std::string                                  role_attribute              = "role";
-    const std::string                                  var_type_attribute          = "var_type";
+    const std::string                                  role_meta              = "role";
+    const std::string                                  var_type_meta          = "var_type";
     const std::map<std::string, std::set<std::string>> use_transformed_storage_map = {
         {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
         {"FaceBlock", {"connectivity_edge"}}};

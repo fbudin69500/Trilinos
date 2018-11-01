@@ -48,6 +48,7 @@
 #include <stk_io/StkMeshIoBroker.hpp>
 
 #include <Ionit_Initializer.h>
+#include <adios/Ioad_Initializer.h>
 #include <Ioss_SubSystem.h>
 
 namespace {
@@ -63,7 +64,7 @@ namespace {
   {
     if (interpolation_intervals == 0)
       interpolation_intervals = 1;
-    
+    Ioad::Initializer(); // ADIOS2
     std::string file = working_directory;
     file += filename;
 
@@ -88,7 +89,7 @@ namespace {
     // This call adds an output database for results data to mesh_data.
     // No data is written at this time other than verifying that the
     // file can be created on the disk.
-    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS);
+    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS, "adios");
 
     // Create restart output ...  ("generated_mesh.restart") ("exodus_mesh.restart")
     std::string restart_filename = working_directory + type + "_mesh.restart";
@@ -338,6 +339,10 @@ int main(int argc, char** argv)
   else if (strncasecmp("pamgen:", mesh.c_str(), 7) == 0) {
     mesh = mesh.substr(7, mesh.size());
     type = "pamgen";
+  }
+  else if (strncasecmp("adios:", mesh.c_str(), 6) == 0) {
+    mesh = mesh.substr(6, mesh.size());
+    type = "adios";
   }
 
   stk::io::HeartbeatType hb_type = stk::io::NONE; // Default is no heartbeat output
