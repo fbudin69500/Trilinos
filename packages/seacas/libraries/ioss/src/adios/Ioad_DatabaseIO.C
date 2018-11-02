@@ -116,19 +116,14 @@ namespace Ioad {
 
   // ====================ADIOSWrapper====================================================
 
-  // DatabaseIO::ADIOSWrapper::ADIOSWrapper(adios2::IO &bpio, const std::string &name, const adios2::Mode mode, MPI_Comm mpiComm)
-  // :bp_engine(bpio.Open(name, mode, mpiComm)), m_OpenStep(false)
-  // {
-  // }
-
   DatabaseIO::ADIOSWrapper::ADIOSWrapper(MPI_Comm comm, const std::string &filename, bool is_input, unsigned long rank)
-  :m_Adios(new adios2::ADIOS(comm)), m_Communicator(comm), m_BPIO(IOInit()), m_BPEngine(EngineInit(comm, filename, is_input)), m_OpenStep(false), m_Rank(rank)
+  :adios2::ADIOS(comm), m_Communicator(comm), adios2::IO(IOInit()), adios2::Engine(EngineInit(comm, filename, is_input)), m_OpenStep(false), m_Rank(rank)
   {
   }
   
-  adios2::IO DatabaseIO::ADIOSWrapper::IOInit() const
+  adios2::IO DatabaseIO::ADIOSWrapper::IOInit()
   {
-    adios2::IO bpio = m_Adios->DeclareIO(m_IOName);
+    adios2::IO bpio = this->ADIOS::DeclareIO("io");
     bpio.SetEngine("BPFile");
     bpio.AddTransport("File", {{"Library", "POSIX"}});
     return bpio;
@@ -140,27 +135,21 @@ namespace Ioad {
     if(!is_input) {
       mode = adios2::Mode::Write;
     }
-    return m_BPIO.Open(filename, mode, communicator);
+    return this->IO::Open(filename, mode, communicator);
   }
 
   DatabaseIO::ADIOSWrapper::~ADIOSWrapper()
   {
     EndStep();
-    m_BPEngine.Close();
-  }
-
-  adios2::Engine & DatabaseIO::ADIOSWrapper::GetEngine()
-  {
-    return m_BPEngine;
+    this->Engine::Close();
   }
 
   void DatabaseIO::ADIOSWrapper::BeginStep()
   {
     if (!m_OpenStep) {
-      if (m_BPEngine.BeginStep() != adios2::StepStatus::OK) {
+      if (this->Engine::BeginStep() != adios2::StepStatus::OK) {
         std::ostringstream errmsg;
         errmsg << "ERROR: `BeginStep()` did not return OK.\n";
-        IOSS_ERROR(errmsg);
       }
       else {
         // If we are here, `BeginStep()` worked.
@@ -174,14 +163,9 @@ namespace Ioad {
   void DatabaseIO::ADIOSWrapper::EndStep()
   {
     if (m_OpenStep) {
-      m_BPEngine.EndStep();
+      this->Engine::EndStep();
       m_OpenStep = false;
     }
-  }
-
-  adios2::IO & DatabaseIO::ADIOSWrapper::GetIO()
-  {
-    return m_BPIO;
   }
 
   std::string DatabaseIO::ADIOSWrapper::EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name) const
@@ -199,30 +183,30 @@ namespace Ioad {
   {
     // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
     if(m_Rank==0) {
-      m_BPIO.DefineVariable<T>(EncodeMetaVariable(meta_name, variable_name));
+      this->IO::DefineVariable<T>(EncodeMetaVariable(meta_name, variable_name));
     }
   }
 
   template <typename T>
-  void DatabaseIO::ADIOSWrapper::PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name) const
+  void DatabaseIO::ADIOSWrapper::PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name)
   {
     // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
     if(m_Rank==0) {
-      m_BPEngine.Put<T>(EncodeMetaVariable(meta_name, variable_name), &value, adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      this->Engine::Put<T>(EncodeMetaVariable(meta_name, variable_name), &value, adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
   }
 
   template <typename T>
-  T DatabaseIO::ADIOSWrapper::GetMetaVariable(const std::string &meta_name, const std::string &variable_name) const
+  T DatabaseIO::ADIOSWrapper::GetMetaVariable(const std::string &meta_name, const std::string &variable_name)
   {
     T variable;
-    m_BPEngine.Get<T>(EncodeMetaVariable(meta_name, variable_name), variable,
+    this->Engine::Get<T>(EncodeMetaVariable(meta_name, variable_name), variable,
                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     return variable;
   }
 
 std::pair<std::string, std::string>
-DatabaseIO::ADIOSWrapper::decode_meta_name(std::string name) const
+DatabaseIO::ADIOSWrapper::DecodeMetaName(std::string name) const
 {
   std::size_t pos = 0;
   std::string meta;
@@ -239,7 +223,7 @@ DatabaseIO::ADIOSWrapper::decode_meta_name(std::string name) const
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
                          const Ioss::PropertyManager &properties_x)
-      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()), ad_wrapper(communicator, filename, is_input(), rank), bpio(ad_wrapper.GetIO()), bp_engine(ad_wrapper.GetEngine())
+      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()), ad_wrapper(communicator, filename, is_input(), rank)
   {
     dbState     = Ioss::STATE_UNKNOWN;
     // Always 64 bits
@@ -360,7 +344,7 @@ int DatabaseIO::RankInit()
       local_size      = field.raw_count();
     }
     std::cout << "define: " << encoded_name << std::endl;
-    bpio.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0},
+    ad_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0},
                            {1, local_size, component_count});
 
     ad_wrapper.DefineMetaVariable<int>(role_meta, encoded_name);
@@ -435,7 +419,7 @@ int DatabaseIO::RankInit()
           define_model_internal<char>(field, encoded_name);
           break;
         case Ioss::Field::BasicType::STRING:
-          bpio.DefineVariable<std::string>(
+          ad_wrapper.DefineVariable<std::string>(
               encoded_name,
               // Global dimensions
               {field.raw_count()},
@@ -470,9 +454,9 @@ int DatabaseIO::RankInit()
     // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
     adios2::Attribute<unsigned int> schema_attr =
-        bpio.InquireAttribute<unsigned int>(schema_version_string);
+        ad_wrapper.InquireAttribute<unsigned int>(schema_version_string);
     if (!schema_attr) {
-      bpio.DefineAttribute<unsigned int>(schema_version_string, 1);
+      ad_wrapper.DefineAttribute<unsigned int>(schema_version_string, 1);
     }
     define_entity_internal<Ioss::NodeBlockContainer>(node_blocks, role);
     // Edge Blocks --
@@ -509,15 +493,15 @@ int DatabaseIO::RankInit()
       std::string encoded_name                = encode_field_name(sset->type_string(), sset->name(),
                                                    "sideblock_names_" + std::to_string(rank));
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
-      adios2::Variable<std::string> sblocks_attr = bpio.InquireVariable<std::string>(encoded_name);
+      adios2::Variable<std::string> sblocks_attr = ad_wrapper.InquireVariable<std::string>(encoded_name);
       if (!sblocks_attr) {
-        bpio.DefineVariable<std::string>(encoded_name);
+        ad_wrapper.DefineVariable<std::string>(encoded_name);
       }
       define_entity_internal<Ioss::SideBlockContainer>(sblocks, role);
     }
 
     // Define global variables
-    ad_wrapper.DefineMetaVariable<double>(time_meta);
+    //ad_wrapper.DefineMetaVariable<double>(time_meta);
   }
 
   //------------------------------------------------------------------------
@@ -540,14 +524,14 @@ int DatabaseIO::RankInit()
                                const std::string &encoded_name, bool transformed_field,
                                size_t data_size) const
   {
-    adios2::Variable<T> entities   = bpio.InquireVariable<T>(encoded_name);
+    adios2::Variable<T> entities   = ad_wrapper.InquireVariable<T>(encoded_name);
     int                 num_to_get = field.verify(data_size);
 
     if (entities && data && data_size) {
 
       std::cout << "Put:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
-      bp_engine.Put<T>(entities, rdata,
+      ad_wrapper.Put<T>(entities, rdata,
                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
 
       ad_wrapper.PutMetaVariable<int>(role_meta, field.get_role(), encoded_name);
@@ -677,7 +661,7 @@ int DatabaseIO::RankInit()
     if (res) {
       std::string                   encoded_name = encode_field_name(ss->type_string(), ss->name(),
                                                    "sideblock_names" + std::to_string(rank));
-      adios2::Variable<std::string> entities     = bpio.InquireVariable<std::string>(encoded_name);
+      adios2::Variable<std::string> entities     = ad_wrapper.InquireVariable<std::string>(encoded_name);
       std::vector<std::string>      block_members;
       for (auto &sb : ss->get_side_blocks()) {
         block_members.push_back(sb->name());
@@ -687,7 +671,7 @@ int DatabaseIO::RankInit()
         for (std::string s : block_members) {
           stringified_block_members += "/" + s;
         }
-        bp_engine.Put<std::string>(
+        ad_wrapper.Put<std::string>(
             entities, stringified_block_members,
             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       }
@@ -864,7 +848,7 @@ int DatabaseIO::RankInit()
   {
     BlockInfoType infos;
 
-    auto   v    = bpio.InquireVariable<T>(var_name);
+    auto   v    = ad_wrapper.InquireVariable<T>(var_name);
     size_t ndim = v.Shape().size();
     if (ndim != 3) {
       std::ostringstream errmsg;
@@ -873,7 +857,7 @@ int DatabaseIO::RankInit()
     }
     // For non-transient variables, not all blocks need to be loaded. Might improve speed.
     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
-        bp_engine.AllStepsBlocksInfo(v);
+        ad_wrapper.AllStepsBlocksInfo(v);
     if (allblocks.empty()) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Empty BP variable\n";
@@ -974,7 +958,7 @@ int DatabaseIO::RankInit()
   {
     std::cout << "read" << std::endl;
     // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = bpio.InquireAttribute<unsigned int>(schema_version_string);
+    auto schema_version = ad_wrapper.InquireAttribute<unsigned int>(schema_version_string);
     if (!schema_version) {
       std::ostringstream errmsg;
       errmsg << "ERROR: schema_version_string not found.\n";
@@ -984,13 +968,13 @@ int DatabaseIO::RankInit()
     VariableMapType variables_map;
 
     const std::map<std::string, std::map<std::string, std::string>> variables =
-        bpio.AvailableVariables();
+        ad_wrapper.AvailableVariables();
     std::string entity_type, entity_name, field_name, meta;
     for (const auto &vpair : variables) {
       const std::string &name                        = vpair.first;
       std::tie(entity_type, entity_name, field_name) = decode_field_name(name);
       // Check if variable contains meta-data (field_name contains meta_separator)
-      std::tie(field_name, meta) = ad_wrapper.decode_meta_name(field_name);
+      std::tie(field_name, meta) = ad_wrapper.DecodeMetaName(field_name);
       // We know this set of keys is unique as it is decoded from the variable name
       // and two varaibles cannot have the same name. Do not save meta-variables.
       if(meta.empty()) {
@@ -1139,14 +1123,14 @@ int DatabaseIO::RankInit()
   int64_t DatabaseIO::get_data(const Ioss::Field &field, void *data,
                                const std::string &encoded_name, size_t data_size) const
   {
-    adios2::Variable<T> entities   = bpio.InquireVariable<T>(encoded_name);
+    adios2::Variable<T> entities   = ad_wrapper.InquireVariable<T>(encoded_name);
     int                 num_to_get = field.verify(data_size);
 
     if (entities && data && data_size) {
 
       std::cout << "Get:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
-      bp_engine.Get<T>(entities, rdata,
+      ad_wrapper.Get<T>(entities, rdata,
                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       return num_to_get;
     }

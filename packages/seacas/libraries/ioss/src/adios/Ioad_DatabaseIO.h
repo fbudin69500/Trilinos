@@ -190,41 +190,45 @@ namespace Ioad {
 
     void get_nodeblocks(const VariableMapType &variables);
 
-    class ADIOSWrapper
-    {
-    public:
-      ADIOSWrapper(MPI_Comm communicator, const std::string &filename, bool is_input, unsigned long rank);
-      //ADIOSWrapper(const ADIOSWrapper&);
-      ADIOSWrapper(ADIOSWrapper&& wrapper);
-      ~ADIOSWrapper();
-      adios2::Engine &GetEngine();
-      adios2::IO &    GetIO();
-      void            BeginStep();
-      void            EndStep();
-      template <typename T>
-      void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name="");
-      template <typename T>
-      void PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name="") const;
-      template <typename T>
-      T GetMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
-      std::pair<std::string, std::string> decode_meta_name(std::string name) const;
+class ADIOSWrapper: private adios2::ADIOS, private adios2::IO, private adios2::Engine
+{
+public:
+  ADIOSWrapper(MPI_Comm communicator, const std::string &filename, bool is_input, unsigned long rank);
+  ADIOSWrapper(ADIOSWrapper&& wrapper);
+  ~ADIOSWrapper();
+  void            BeginStep();
+  void            EndStep();
+  template <typename T>
+  void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name="");
+  template <typename T>
+  void PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name="");
+  template <typename T>
+  T GetMetaVariable(const std::string &meta_name, const std::string &variable_name="");
+  std::pair<std::string, std::string> DecodeMetaName(std::string name) const;
 
-    private:
-      adios2::IO     IOInit() const;
-      adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
-      std::string    EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
+  using adios2::IO::DefineVariable;
+  using adios2::IO::DefineAttribute;
+  using adios2::IO::InquireAttribute;
+  using adios2::IO::InquireVariable;
+  using adios2::IO::AvailableVariables;
+  using adios2::Engine::Put;
+  using adios2::Engine::Get;
+  using adios2::Engine::AllStepsBlocksInfo;
+private:
+  adios2::IO     IOInit();
+  adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
+  std::string    EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
 
-      const std::string m_MetaSeparator = "::";
-      const std::string m_IOName        = "io";
+  const std::string m_MetaSeparator{"::"};
 
-      const int                            m_Rank;
-      const std::unique_ptr<adios2::ADIOS> m_Adios;
-      const MPI_Comm                       m_Communicator;
+  const int                            m_Rank;
+//  adios2::ADIOS *m_Adios;
+  const MPI_Comm                       m_Communicator;
 
-      adios2::IO             m_BPIO;
-      mutable adios2::Engine m_BPEngine;
-      bool                   m_OpenStep;
-    };
+  //adios2::IO             m_BPIO;
+//  mutable adios2::Engine m_BPEngine;
+  bool                   m_OpenStep;
+};
 
     // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
     // size,
@@ -237,9 +241,7 @@ namespace Ioad {
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;
     unsigned long rank; // rank needs to be declared first to be initialized before ad_wrapper.
-    ADIOSWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio and bp_engine to be initialized first.
-    adios2::IO &bpio;
-    adios2::Engine &bp_engine;
+    mutable ADIOSWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio and bp_engine to be initialized first.
     const std::string                                  schema_version_string = "IOSS_adios_version";
     int                                                spatialDimension{0};
     unsigned long                                      number_proc;
