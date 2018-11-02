@@ -129,14 +129,14 @@ namespace Ioad {
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
                          const Ioss::PropertyManager &properties_x)
       : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()),
-        ad_wrapper(communicator, filename, is_input(), rank)
+        adios_wrapper(communicator, filename, is_input(), rank)
   {
     dbState = Ioss::STATE_UNKNOWN;
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
   }
 
-  // Used to force `rank` initialization before creating `ad_wrapper`.
+  // Used to force `rank` initialization before creating `adios_wrapper`.
   int DatabaseIO::RankInit()
   {
     Ioss::SerializeIO serializeIO__(this);
@@ -149,8 +149,8 @@ namespace Ioad {
   bool DatabaseIO::begin__(Ioss::State state)
   {
     dbState = state;
-    if (state == Ioss::STATE_MODEL || state == Ioss::STATE_TRANSIENT) {
-      ad_wrapper.BeginStep();
+    if (state == Ioss::STATE_MODEL) {
+      adios_wrapper.BeginStep();
     }
     return true;
   }
@@ -166,28 +166,17 @@ namespace Ioad {
         define_global_variables();
       }
       break;
-    case Ioss::STATE_MODEL: break;
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input()) {
         Ioss::Field::RoleType role = Ioss::Field::RoleType::TRANSIENT;
         define_model(&role);
       }
-      //      write_results_metadata();
-      break;
-    case Ioss::STATE_TRANSIENT:
-      if (!is_input()) {
-        ad_wrapper.EndStep();
-      }
       break;
     default: // ignore everything else...
-      if (!is_input()) {
-        //        WriteXmlFile(NumOfIterations);
-      }
       break;
     }
 
     {
-      Ioss::SerializeIO serializeIO__(this);
       dbState = Ioss::STATE_UNKNOWN;
     }
 
@@ -197,10 +186,12 @@ namespace Ioad {
   bool DatabaseIO::begin_state__(Ioss::Region * /* region */, int state, double time)
   {
     if (!is_input()) {
+      // Begin  step for transient data
+      adios_wrapper.BeginStep();
       // Add time to adios
-      adios2::Variable<double> time_var = ad_wrapper.InquireVariable<double>(Time_meta);
+      adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
       if (time_var) {
-        ad_wrapper.PutMetaVariable<double>(Time_meta, time / timeScaleFactor);
+        adios_wrapper.PutMetaVariable<double>(Time_meta, time / timeScaleFactor);
       }
       else {
         std::ostringstream errmsg;
@@ -218,8 +209,10 @@ namespace Ioad {
   // common
   bool DatabaseIO::end_state__(Ioss::Region * /*region*/, int state, double time)
   {
-    // TODO: Only worry about this is we care about `last_written_time`. We may not care about this,
-    // this might be something that only exodus wants to do, but not ADIOS.
+    if (!is_input()) {
+      // End step for transient data
+      adios_wrapper.EndStep();
+    }
     return true;
   }
 
@@ -251,12 +244,11 @@ namespace Ioad {
       component_count = field.raw_storage()->component_count();
       local_size      = field.raw_count();
     }
-    std::cout << "define: " << encoded_name << std::endl;
-    ad_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
+    adios_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
                                  {rank, 0, 0}, {1, local_size, component_count});
 
-    ad_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
-    ad_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
+    adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
+    adios_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
   }
 
   std::string DatabaseIO::encode_field_name(const std::string &entity_type,
@@ -327,7 +319,7 @@ namespace Ioad {
           define_model_internal<char>(field, encoded_name);
           break;
         case Ioss::Field::BasicType::STRING:
-          ad_wrapper.DefineVariable<std::string>(
+          adios_wrapper.DefineVariable<std::string>(
               encoded_name,
               // Global dimensions
               {field.raw_count()},
@@ -362,9 +354,9 @@ namespace Ioad {
     // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
     adios2::Attribute<unsigned int> schema_attr =
-        ad_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
+        adios_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
     if (!schema_attr) {
-      ad_wrapper.DefineAttribute<unsigned int>(Schema_version_string, 1);
+      adios_wrapper.DefineAttribute<unsigned int>(Schema_version_string, 1);
     }
     define_entity_internal<Ioss::NodeBlockContainer>(node_blocks, role);
     // Edge Blocks --
@@ -402,9 +394,9 @@ namespace Ioad {
                                                    "sideblock_names_" + std::to_string(rank));
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
       adios2::Variable<std::string>   sblocks_var =
-          ad_wrapper.InquireVariable<std::string>(encoded_name);
+          adios_wrapper.InquireVariable<std::string>(encoded_name);
       if (!sblocks_var) {
-        ad_wrapper.DefineVariable<std::string>(encoded_name);
+        adios_wrapper.DefineVariable<std::string>(encoded_name);
       }
       define_entity_internal<Ioss::SideBlockContainer>(sblocks, role);
     }
@@ -412,7 +404,7 @@ namespace Ioad {
 
   void DatabaseIO::define_global_variables()
   {
-    ad_wrapper.DefineMetaVariable<double>(Time_meta);
+    adios_wrapper.DefineMetaVariable<double>(Time_meta);
   }
 
   //------------------------------------------------------------------------
@@ -435,20 +427,18 @@ namespace Ioad {
                                const std::string &encoded_name, bool transformed_field,
                                size_t data_size) const
   {
-    adios2::Variable<T> entities   = ad_wrapper.InquireVariable<T>(encoded_name);
+    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
     int                 num_to_get = field.verify(data_size);
 
     if (entities && data && data_size) {
-
-      std::cout << "Put:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
-      ad_wrapper.Put<T>(entities, rdata,
+      adios_wrapper.Put<T>(entities, rdata,
                         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
 
-      ad_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
+      adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
       std::string var_type =
           transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
-      ad_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
+      adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
       return num_to_get;
     }
     return 0;
@@ -573,7 +563,7 @@ namespace Ioad {
       std::string                   encoded_name = encode_field_name(ss->type_string(), ss->name(),
                                                    "sideblock_names" + std::to_string(rank));
       adios2::Variable<std::string> entities =
-          ad_wrapper.InquireVariable<std::string>(encoded_name);
+          adios_wrapper.InquireVariable<std::string>(encoded_name);
       std::vector<std::string> block_members;
       for (auto &sb : ss->get_side_blocks()) {
         block_members.push_back(sb->name());
@@ -583,7 +573,7 @@ namespace Ioad {
         for (std::string s : block_members) {
           stringified_block_members += "/" + s;
         }
-        ad_wrapper.Put<std::string>(
+        adios_wrapper.Put<std::string>(
             entities, stringified_block_members,
             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       }
@@ -708,12 +698,8 @@ namespace Ioad {
 
     Ioss::NameList field_names;
     block->field_describe(&field_names);
-    for (std::string &s : field_names) {
-      std::cout << "default fields:" << s << std::endl;
-    }
     block->property_add(Ioss::Property("id", 1));
     block->property_add(Ioss::Property("guid", util().generate_guid(1)));
-    std::cout << "reader:" << std::endl;
     for (auto &variable : entity_map.at(block_name)) {
       // Since some fields are created automatically, we need to avoid recreating them when loading
       // the file.
@@ -757,7 +743,7 @@ namespace Ioad {
   {
     BlockInfoType infos;
 
-    auto   v    = ad_wrapper.InquireVariable<T>(var_name);
+    auto   v    = adios_wrapper.InquireVariable<T>(var_name);
     size_t ndim = v.Shape().size();
     if (ndim != 3) {
       std::ostringstream errmsg;
@@ -766,7 +752,7 @@ namespace Ioad {
     }
     // For non-transient variables, not all blocks need to be loaded. Might improve speed.
     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
-        ad_wrapper.AllStepsBlocksInfo(v);
+        adios_wrapper.AllStepsBlocksInfo(v);
     if (allblocks.empty()) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Empty BP variable\n";
@@ -775,7 +761,7 @@ namespace Ioad {
     size_t laststep = allblocks.rbegin()->first;
     // Only transient fields can have steps.
     infos.role =
-        static_cast<Ioss::Field::RoleType>(ad_wrapper.GetMetaVariable<int>(Role_meta, var_name));
+        static_cast<Ioss::Field::RoleType>(adios_wrapper.GetMetaVariable<int>(Role_meta, var_name));
     if (infos.role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Last step should be 0 for non-transient fields. "
@@ -784,7 +770,7 @@ namespace Ioad {
     }
 
     // Get VariableType
-    infos.variable_type = ad_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
+    infos.variable_type = adios_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
 
     bool first = true;
     for (auto &blockpair : allblocks) {
@@ -866,9 +852,8 @@ namespace Ioad {
 
   void DatabaseIO::read_meta_data__()
   {
-    std::cout << "read" << std::endl;
     // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = ad_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
+    auto schema_version = adios_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
     if (!schema_version) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Schema_version_string not found.\n";
@@ -878,13 +863,13 @@ namespace Ioad {
     VariableMapType variables_map;
 
     const std::map<std::string, std::map<std::string, std::string>> variables =
-        ad_wrapper.AvailableVariables();
+        adios_wrapper.AvailableVariables();
     std::string entity_type, entity_name, field_name, meta;
     for (const auto &vpair : variables) {
       const std::string &name                        = vpair.first;
       std::tie(entity_type, entity_name, field_name) = decode_field_name(name);
       // Check if variable contains meta-data (field_name contains meta_separator)
-      std::tie(field_name, meta) = ad_wrapper.DecodeMetaName(field_name);
+      std::tie(field_name, meta) = adios_wrapper.DecodeMetaName(field_name);
       // We know this set of keys is unique as it is decoded from the variable name
       // and two varaibles cannot have the same name. Do not save meta-variables.
       if (meta.empty()) {
@@ -894,7 +879,6 @@ namespace Ioad {
     }
 
     // read_region(reader_io);
-    std::cout << "======================================" << std::endl;
     // read_communication_metadata();
 
     // get_step_times__();
@@ -1031,14 +1015,12 @@ namespace Ioad {
   int64_t DatabaseIO::get_data(const Ioss::Field &field, void *data,
                                const std::string &encoded_name, size_t data_size) const
   {
-    adios2::Variable<T> entities   = ad_wrapper.InquireVariable<T>(encoded_name);
+    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
     int                 num_to_get = field.verify(data_size);
 
     if (entities && data && data_size) {
-
-      std::cout << "Get:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
-      ad_wrapper.Get<T>(entities, rdata,
+      adios_wrapper.Get<T>(entities, rdata,
                         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       return num_to_get;
     }

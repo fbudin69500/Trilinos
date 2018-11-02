@@ -198,8 +198,8 @@ namespace Ioad {
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;
-    unsigned long rank; // rank needs to be declared first to be initialized before ad_wrapper.
-    mutable AdiosWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio
+    unsigned long rank; // rank needs to be declared first to be initialized before adios_wrapper.
+    mutable AdiosWrapper adios_wrapper; // adios_wrapper needs to be declared before bpio
                                      // and bp_engine to be initialized first.
     int                                                spatialDimension{0};
     unsigned long                                      number_proc;
