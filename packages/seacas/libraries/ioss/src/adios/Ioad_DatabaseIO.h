@@ -38,7 +38,7 @@
 #include <Ioss_DatabaseIO.h>
 
 #include "Ioss_Field.h" // for Field, etc
-#include <adios2.h>
+#include <AdiosWrapper.h>
 #include <set>
 
 namespace Ioss {
@@ -56,17 +56,6 @@ namespace Ioss {
 /** \brief A namespace for the adios database format.
  */
 namespace Ioad {
-
-  struct BlockInfoType
-  {
-    std::vector<size_t>    steps;
-    size_t                 node_boundaries_start;
-    size_t                 node_boundaries_size;
-    size_t                 component_count = {0};
-    Ioss::Field::RoleType  role;
-    std::string            variable_type;
-    Ioss::Field::BasicType basic_type;
-  };
 
   class DatabaseIO : public Ioss::DatabaseIO
   {
@@ -114,8 +103,8 @@ namespace Ioad {
     int64_t get_field_internal(const std::string &entity_type, const std::string &entity_name,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     template <typename T>
-    int64_t get_data(const Ioss::Field &field, void *data,
-                     const std::string &encoded_name, size_t data_size) const;
+    int64_t get_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
+                     size_t data_size) const;
 
     int64_t put_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
@@ -150,34 +139,43 @@ namespace Ioad {
                                const Ioss::Field &field, void *data, size_t data_size) const;
     void    read_meta_data__() override;
     void    define_model(Ioss::Field::RoleType *role = nullptr);
+    void    define_global_variables();
     // void read_region(adios2::IO & bpio);
 
     int64_t element_global_to_local__(int64_t global) const { return 0; }
     int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
 
     template <typename T>
-    int64_t put_data(const Ioss::Field &field, void *data,
-                     const std::string &encoded_name, bool transformed_field,
-                     size_t data_size) const;
+    int64_t put_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
+                     bool transformed_field, size_t data_size) const;
     template <typename T>
-    void                       define_model_internal(const Ioss::Field &field,
-                                                     const std::string &encoded_name);
-    template <typename T> void define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role);
+    void define_model_internal(const Ioss::Field &field, const std::string &encoded_name);
+    template <typename T>
+    void define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role);
 
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
 
-    template <typename T>
-    BlockInfoType get_variable_infos(const std::string &var_name) const;
+    struct BlockInfoType
+    {
+      std::vector<size_t>    steps;
+      size_t                 node_boundaries_start;
+      size_t                 node_boundaries_size;
+      size_t                 component_count = {0};
+      Ioss::Field::RoleType  role;
+      std::string            variable_type;
+      Ioss::Field::BasicType basic_type;
+    };
+
+    template <typename T> BlockInfoType get_variable_infos(const std::string &var_name) const;
     using EntityMapType =
         std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>;
     using VariableMapType = std::map<std::string, EntityMapType>;
 
     template <typename T>
-    BlockInfoType get_variable_infos_from_map(const EntityMapType &variables_map,
-                                              const std::string &entity_name,
-                                              const std::string &block_name,
-                                              const std::string &var_name) const;
+    BlockInfoType
+                  get_variable_infos_from_map(const EntityMapType &variables_map, const std::string &entity_name,
+                                              const std::string &block_name, const std::string &var_name) const;
     BlockInfoType get_variable_infos_from_map_no_check(const EntityMapType &variables_map,
                                                        const std::string &  entity_name,
                                                        const std::string &  block_name,
@@ -190,77 +188,21 @@ namespace Ioad {
 
     void get_nodeblocks(const VariableMapType &variables);
 
-class ADIOSWrapper: private adios2::ADIOS, private adios2::IO, private adios2::Engine
-{
-public:
-  ADIOSWrapper(MPI_Comm communicator, const std::string &filename, bool is_input, unsigned long rank);
-  ADIOSWrapper(ADIOSWrapper&& wrapper);
-  ~ADIOSWrapper();
-  void            BeginStep();
-  void            EndStep();
-  template <typename T>
-  void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name="");
-  template <typename T>
-  void PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name="");
-  template <typename T>
-  T GetMetaVariable(const std::string &meta_name, const std::string &variable_name="");
-  std::pair<std::string, std::string> DecodeMetaName(std::string name) const;
-
-  using adios2::IO::DefineVariable;
-  using adios2::IO::DefineAttribute;
-  using adios2::IO::InquireAttribute;
-  using adios2::IO::InquireVariable;
-  using adios2::IO::AvailableVariables;
-  using adios2::Engine::Put;
-  using adios2::Engine::Get;
-  using adios2::Engine::AllStepsBlocksInfo;
-private:
-  adios2::IO     IOInit();
-  adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
-  std::string    EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
-
-  const std::string m_MetaSeparator{"::"};
-
-  const int                            m_Rank;
-//  adios2::ADIOS *m_Adios;
-  const MPI_Comm                       m_Communicator;
-
-  //adios2::IO             m_BPIO;
-//  mutable adios2::Engine m_BPEngine;
-  bool                   m_OpenStep;
-};
-
     // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
     // size,
     //                      std::map<std::string, std::pair<std::string, std::string>>
     //                      field_names);
-    int RankInit();
+    int  RankInit();
     bool begin_state__(Ioss::Region * /* region */, int state, double time);
     bool end_state__(Ioss::Region * /*region*/, int state, double time);
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;
     unsigned long rank; // rank needs to be declared first to be initialized before ad_wrapper.
-    mutable ADIOSWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio and bp_engine to be initialized first.
-    const std::string                                  schema_version_string = "IOSS_adios_version";
+    mutable AdiosWrapper ad_wrapper; // ad_wrapper needs to be declared before bpio
+                                     // and bp_engine to be initialized first.
     int                                                spatialDimension{0};
     unsigned long                                      number_proc;
-    const std::string                                  name_separator              = "/";
-    const std::string                                  role_meta              = "role";
-    const std::string                                  var_type_meta          = "var_type";
-    const std::string time_meta = "time";
-    const std::map<std::string, std::set<std::string>> use_transformed_storage_map = {
-        {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
-        {"FaceBlock", {"connectivity_edge"}}};
-    const std::map<std::string, std::set<std::string>> ignore_fields = {
-        {"NodeBlock",
-         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
-        {"ElementBlock", {"implicit_ids"}},
-        {"FaceBlock", {"connectivity_raw"}},
-        {"EdgeBlock", {"connectivity_raw"}},
-        {"CommSet", {"ids"}},
-        {"SideSet", {"ids"}},
-        {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
   };
 } // namespace Ioad
 #endif

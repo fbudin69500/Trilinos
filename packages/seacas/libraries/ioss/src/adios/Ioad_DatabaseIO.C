@@ -55,17 +55,9 @@
 #include <Ioss_ParallelUtils.h>   // for ParallelUtils, etc
 #include <Ioss_SerializeIO.h>     // for SerializeIO
 #include <Ioss_Utils.h>           // for Utils, IOSS_ERROR, etc
-//#include <algorithm>              // for fill_n, find, fill
-//#include <assert.h>               // for assert
-//#include <cstring>                // for nullptr, strncasecmp, strcpy, etc
-//#include <ctype.h>                // for isdigit
-//#include <iostream>               // for cout
-//#include <map>                    // for _Rb_tree_iterator, etc
-//#include <stdio.h>                // for remove
-//#include <stdlib.h>               // for atoi
-//#include <string>                 // for char_traits, string, etc
-//#include <vector>                 // for vector, etc
+
 #include "adios2/helper/adiosFunctions.h"
+
 #include <adios/Ioad_DatabaseIO.h>
 
 namespace Ioss {
@@ -110,137 +102,49 @@ namespace {
     return Ioss::Field::BasicType::CHARACTER;
   }
 
+  // Constant variables
+  const std::string                                  Schema_version_string = "IOSS_adios_version";
+  const std::string                                  Name_separator        = "/";
+  const std::string                                  Role_meta             = "role";
+  const std::string                                  Var_type_meta         = "var_type";
+  const std::string                                  Time_meta             = "time";
+  const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
+      {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
+      {"FaceBlock", {"connectivity_edge"}}};
+  const std::map<std::string, std::set<std::string>> Ignore_fields = {
+      {"NodeBlock",
+       {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
+      {"ElementBlock", {"implicit_ids"}},
+      {"FaceBlock", {"connectivity_raw"}},
+      {"EdgeBlock", {"connectivity_raw"}},
+      {"CommSet", {"ids"}},
+      {"SideSet", {"ids"}},
+      {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
+
 } // namespace
 
 namespace Ioad {
 
-  // ====================ADIOSWrapper====================================================
-
-  DatabaseIO::ADIOSWrapper::ADIOSWrapper(MPI_Comm comm, const std::string &filename, bool is_input, unsigned long rank)
-  :adios2::ADIOS(comm), m_Communicator(comm), adios2::IO(IOInit()), adios2::Engine(EngineInit(comm, filename, is_input)), m_OpenStep(false), m_Rank(rank)
-  {
-  }
-  
-  adios2::IO DatabaseIO::ADIOSWrapper::IOInit()
-  {
-    adios2::IO bpio = this->ADIOS::DeclareIO("io");
-    bpio.SetEngine("BPFile");
-    bpio.AddTransport("File", {{"Library", "POSIX"}});
-    return bpio;
-  }
-
-  adios2::Engine DatabaseIO::ADIOSWrapper::EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input)
-  {
-    adios2::Mode mode = adios2::Mode::Read;
-    if(!is_input) {
-      mode = adios2::Mode::Write;
-    }
-    return this->IO::Open(filename, mode, communicator);
-  }
-
-  DatabaseIO::ADIOSWrapper::~ADIOSWrapper()
-  {
-    EndStep();
-    this->Engine::Close();
-  }
-
-  void DatabaseIO::ADIOSWrapper::BeginStep()
-  {
-    if (!m_OpenStep) {
-      if (this->Engine::BeginStep() != adios2::StepStatus::OK) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: `BeginStep()` did not return OK.\n";
-      }
-      else {
-        // If we are here, `BeginStep()` worked.
-        m_OpenStep = true;
-      }
-    }
-    // Either we took called `BeginStep()` successfully or we didn't need to. Either
-    // way, there was no issue.
-  }
-
-  void DatabaseIO::ADIOSWrapper::EndStep()
-  {
-    if (m_OpenStep) {
-      this->Engine::EndStep();
-      m_OpenStep = false;
-    }
-  }
-
-  std::string DatabaseIO::ADIOSWrapper::EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name) const
-  {
-    if(!variable_name.empty()) {
-      return variable_name + m_MetaSeparator + meta_name;
-    }
-    else {
-      return meta_name;
-    }
-  }
-
-  template <typename T>
-  void DatabaseIO::ADIOSWrapper::DefineMetaVariable(const std::string &meta_name, const std::string &variable_name)
-  {
-    // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
-    if(m_Rank==0) {
-      this->IO::DefineVariable<T>(EncodeMetaVariable(meta_name, variable_name));
-    }
-  }
-
-  template <typename T>
-  void DatabaseIO::ADIOSWrapper::PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name)
-  {
-    // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
-    if(m_Rank==0) {
-      this->Engine::Put<T>(EncodeMetaVariable(meta_name, variable_name), &value, adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    }
-  }
-
-  template <typename T>
-  T DatabaseIO::ADIOSWrapper::GetMetaVariable(const std::string &meta_name, const std::string &variable_name)
-  {
-    T variable;
-    this->Engine::Get<T>(EncodeMetaVariable(meta_name, variable_name), variable,
-                       adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    return variable;
-  }
-
-std::pair<std::string, std::string>
-DatabaseIO::ADIOSWrapper::DecodeMetaName(std::string name) const
-{
-  std::size_t pos = 0;
-  std::string meta;
-  pos = name.rfind(m_MetaSeparator);
-  if(pos != std::string::npos && pos != name.size()-1) {
-    meta = name.substr(pos + m_MetaSeparator.size());
-    name = name.substr(0, pos);
-  }
-  return std::make_pair(name, meta);
-}
-
-
-  // =======================DatabaseIO=================================================
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
                          const Ioss::PropertyManager &properties_x)
-      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()), ad_wrapper(communicator, filename, is_input(), rank)
+      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()),
+        ad_wrapper(communicator, filename, is_input(), rank)
   {
-    dbState     = Ioss::STATE_UNKNOWN;
+    dbState = Ioss::STATE_UNKNOWN;
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
   }
 
-// Used to force `rank` initialization before creating `ad_wrapper`.
-int DatabaseIO::RankInit()
-{
+  // Used to force `rank` initialization before creating `ad_wrapper`.
+  int DatabaseIO::RankInit()
+  {
     Ioss::SerializeIO serializeIO__(this);
     number_proc = Ioss::SerializeIO::getSize();
     return Ioss::SerializeIO::getRank();
-}
-
-  DatabaseIO::~DatabaseIO()
-  {
   }
+
+  DatabaseIO::~DatabaseIO() {}
 
   bool DatabaseIO::begin__(Ioss::State state)
   {
@@ -259,10 +163,10 @@ int DatabaseIO::RankInit()
     case Ioss::STATE_DEFINE_MODEL:
       if (!is_input()) {
         define_model();
+        define_global_variables();
       }
       break;
-    case Ioss::STATE_MODEL:
-      break;
+    case Ioss::STATE_MODEL: break;
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input()) {
         Ioss::Field::RoleType role = Ioss::Field::RoleType::TRANSIENT;
@@ -292,15 +196,22 @@ int DatabaseIO::RankInit()
 
   bool DatabaseIO::begin_state__(Ioss::Region * /* region */, int state, double time)
   {
-    time /= timeScaleFactor;
-
     if (!is_input()) {
-      // Add time to adios -> define variable
+      // Add time to adios
+      adios2::Variable<double> time_var = ad_wrapper.InquireVariable<double>(Time_meta);
+      if (time_var) {
+        ad_wrapper.PutMetaVariable<double>(Time_meta, time / timeScaleFactor);
+      }
+      else {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Time variable not defined.\n";
+        IOSS_ERROR(errmsg);
+      }
     }
     else {
       // TODO: Figure out if something needs to be done here.
       // Store reduction variables
-      //read_reduction_fields();
+      // read_reduction_fields();
     }
   }
 
@@ -312,27 +223,24 @@ int DatabaseIO::RankInit()
     return true;
   }
 
-
-
   bool DatabaseIO::use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                            const std::string &field_name) const
   {
     if (field.get_role() == Ioss::Field::RoleType::TRANSIENT ||
-        find_field_in_mapset(entity_type, field_name, use_transformed_storage_map)) {
+        find_field_in_mapset(entity_type, field_name, Use_transformed_storage_map)) {
       return true;
     }
     return false;
   }
 
   template <typename T>
-  void DatabaseIO::define_model_internal(const Ioss::Field &field,
-                                         const std::string &encoded_name)
+  void DatabaseIO::define_model_internal(const Ioss::Field &field, const std::string &encoded_name)
   {
     size_t      component_count;
     size_t      local_size;
     std::string entity_type, field_name;
     std::tie(entity_type, std::ignore, field_name) = decode_field_name(encoded_name);
-    if (find_field_in_mapset(entity_type, field_name, ignore_fields)) {
+    if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return;
     }
     if (use_transformed_storage(field, entity_type, field_name)) {
@@ -344,35 +252,36 @@ int DatabaseIO::RankInit()
       local_size      = field.raw_count();
     }
     std::cout << "define: " << encoded_name << std::endl;
-    ad_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count}, {rank, 0, 0},
-                           {1, local_size, component_count});
+    ad_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
+                                 {rank, 0, 0}, {1, local_size, component_count});
 
-    ad_wrapper.DefineMetaVariable<int>(role_meta, encoded_name);
-    ad_wrapper.DefineMetaVariable<std::string>(var_type_meta, encoded_name);
+    ad_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
+    ad_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
   }
 
   std::string DatabaseIO::encode_field_name(const std::string &entity_type,
                                             const std::string &entity_name,
                                             const std::string &field_name) const
   {
-    return entity_type + name_separator + entity_name + name_separator + field_name;
+    return entity_type + Name_separator + entity_name + Name_separator + field_name;
   }
 
   std::tuple<std::string, std::string, std::string>
   DatabaseIO::decode_field_name(const std::string &encoded_name) const
   {
     std::size_t current, previous = 0;
-    current = encoded_name.find_first_of(name_separator);
+    current = encoded_name.find_first_of(Name_separator);
     std::vector<std::string> container;
-    // Stop after finding `name_separator` twice as the result is suppose to be
+    // Stop after finding `Name_separator` twice as the result is suppose to be
     // a triplet `entity_type`/`entity_name`/`field_name`
-    // This means `field_name` is allowed to contain `name_separator`.
-    // `name_separator` cannot be the final character as that would mean that the final
+    // This means `field_name` is allowed to contain `Name_separator`.
+    // `Name_separator` cannot be the final character as that would mean that the final
     // string is empty.
-    while (current != std::string::npos && current != encoded_name.size()-1 && container.size() <= 2) {
+    while (current != std::string::npos && current != encoded_name.size() - 1 &&
+           container.size() <= 2) {
       container.push_back(encoded_name.substr(previous, current - previous));
       previous = current + 1;
-      current  = encoded_name.find_first_of(name_separator, previous);
+      current  = encoded_name.find_first_of(Name_separator, previous);
     }
     container.push_back(encoded_name.substr(previous, current - previous));
     if (container.size() != 3) {
@@ -382,7 +291,6 @@ int DatabaseIO::RankInit()
     }
     return make_tuple(container[0], container[1], container[2]);
   }
-
 
   template <typename T>
   void DatabaseIO::define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role)
@@ -454,9 +362,9 @@ int DatabaseIO::RankInit()
     // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
     adios2::Attribute<unsigned int> schema_attr =
-        ad_wrapper.InquireAttribute<unsigned int>(schema_version_string);
+        ad_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
     if (!schema_attr) {
-      ad_wrapper.DefineAttribute<unsigned int>(schema_version_string, 1);
+      ad_wrapper.DefineAttribute<unsigned int>(Schema_version_string, 1);
     }
     define_entity_internal<Ioss::NodeBlockContainer>(node_blocks, role);
     // Edge Blocks --
@@ -493,15 +401,18 @@ int DatabaseIO::RankInit()
       std::string encoded_name                = encode_field_name(sset->type_string(), sset->name(),
                                                    "sideblock_names_" + std::to_string(rank));
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
-      adios2::Variable<std::string> sblocks_attr = ad_wrapper.InquireVariable<std::string>(encoded_name);
-      if (!sblocks_attr) {
+      adios2::Variable<std::string>   sblocks_var =
+          ad_wrapper.InquireVariable<std::string>(encoded_name);
+      if (!sblocks_var) {
         ad_wrapper.DefineVariable<std::string>(encoded_name);
       }
       define_entity_internal<Ioss::SideBlockContainer>(sblocks, role);
     }
+  }
 
-    // Define global variables
-    //ad_wrapper.DefineMetaVariable<double>(time_meta);
+  void DatabaseIO::define_global_variables()
+  {
+    ad_wrapper.DefineMetaVariable<double>(Time_meta);
   }
 
   //------------------------------------------------------------------------
@@ -532,12 +443,12 @@ int DatabaseIO::RankInit()
       std::cout << "Put:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
       ad_wrapper.Put<T>(entities, rdata,
-                       adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
 
-      ad_wrapper.PutMetaVariable<int>(role_meta, field.get_role(), encoded_name);
+      ad_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
       std::string var_type =
           transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
-      ad_wrapper.PutMetaVariable<std::string>(var_type_meta, var_type, encoded_name);
+      ad_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
       return num_to_get;
     }
     return 0;
@@ -573,7 +484,7 @@ int DatabaseIO::RankInit()
                                          void *data, size_t data_size) const
   {
     const std::string &field_name = field.get_name();
-    if (find_field_in_mapset(entity_type, field_name, ignore_fields)) {
+    if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return 0;
     }
 
@@ -661,8 +572,9 @@ int DatabaseIO::RankInit()
     if (res) {
       std::string                   encoded_name = encode_field_name(ss->type_string(), ss->name(),
                                                    "sideblock_names" + std::to_string(rank));
-      adios2::Variable<std::string> entities     = ad_wrapper.InquireVariable<std::string>(encoded_name);
-      std::vector<std::string>      block_members;
+      adios2::Variable<std::string> entities =
+          ad_wrapper.InquireVariable<std::string>(encoded_name);
+      std::vector<std::string> block_members;
       for (auto &sb : ss->get_side_blocks()) {
         block_members.push_back(sb->name());
       }
@@ -721,10 +633,9 @@ int DatabaseIO::RankInit()
   //   //     }
   // }
   template <typename T>
-  BlockInfoType DatabaseIO::get_variable_infos_from_map(const EntityMapType &entity_map,
-                                                        const std::string &  entity_name,
-                                                        const std::string &  block_name,
-                                                        const std::string &  var_name) const
+  DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos_from_map(
+      const EntityMapType &entity_map, const std::string &entity_name,
+      const std::string &block_name, const std::string &var_name) const
   {
     // No check to verify that the block_name, entity_name, variable_name, and type exist as they
     // have been extracted earlier from the file and everything should still be up to date.
@@ -741,14 +652,12 @@ int DatabaseIO::RankInit()
              << "` field.\n";
       IOSS_ERROR(errmsg);
     }
-    return get_variable_infos_from_map_no_check(entity_map, entity_name, block_name,
-                                                var_name);
+    return get_variable_infos_from_map_no_check(entity_map, entity_name, block_name, var_name);
   }
 
-  BlockInfoType DatabaseIO::get_variable_infos_from_map_no_check(const EntityMapType &entity_map,
-                                                                 const std::string &  entity_name,
-                                                                 const std::string &  block_name,
-                                                                 const std::string &var_name) const
+  DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos_from_map_no_check(
+      const EntityMapType &entity_map, const std::string &entity_name,
+      const std::string &block_name, const std::string &var_name) const
   {
     std::string variable = encode_field_name(entity_name, block_name, var_name);
     std::string type     = entity_map.at(block_name).at(var_name).second;
@@ -785,8 +694,8 @@ int DatabaseIO::RankInit()
     // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
     std::string coord_var_name = "mesh_model_coordinates";
     // Get `node_count` and `spatialDimension`.
-    BlockInfoType model_coordinates_infos = get_variable_infos_from_map<double>(
-        entity_map, entity_name, block_name, coord_var_name);
+    BlockInfoType model_coordinates_infos =
+        get_variable_infos_from_map<double>(entity_map, entity_name, block_name, coord_var_name);
     spatialDimension = model_coordinates_infos.component_count;
     if (!spatialDimension) {
       std::ostringstream errmsg;
@@ -844,7 +753,7 @@ int DatabaseIO::RankInit()
   // } // namespace Ioad
 
   template <typename T>
-  BlockInfoType DatabaseIO::get_variable_infos(const std::string &var_name) const
+  DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos(const std::string &var_name) const
   {
     BlockInfoType infos;
 
@@ -865,7 +774,8 @@ int DatabaseIO::RankInit()
     }
     size_t laststep = allblocks.rbegin()->first;
     // Only transient fields can have steps.
-    infos.role = static_cast<Ioss::Field::RoleType>(ad_wrapper.GetMetaVariable<int>(role_meta, var_name));
+    infos.role =
+        static_cast<Ioss::Field::RoleType>(ad_wrapper.GetMetaVariable<int>(Role_meta, var_name));
     if (infos.role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Last step should be 0 for non-transient fields. "
@@ -874,7 +784,7 @@ int DatabaseIO::RankInit()
     }
 
     // Get VariableType
-    infos.variable_type = ad_wrapper.GetMetaVariable<std::string>(var_type_meta, var_name);
+    infos.variable_type = ad_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
 
     bool first = true;
     for (auto &blockpair : allblocks) {
@@ -920,10 +830,10 @@ int DatabaseIO::RankInit()
   //   {
 
   //     // Only get schema version attribute as it is the only one we expect.
-  //     auto schema_version = bpio.InquireAttribute<unsigned int>(schema_version_string);
+  //     auto schema_version = bpio.InquireAttribute<unsigned int>(Schema_version_string);
   //     if (!schema_version) {
   //       std::ostringstream errmsg;
-  //       errmsg << "INTERNAL ERROR: schema_version_string not found. "
+  //       errmsg << "INTERNAL ERROR: Schema_version_string not found. "
   //              << "Something is wrong in the Ioad::DatabaseIO::read_region() function. "
   //              << "Please check input file.\n";
   //       IOSS_ERROR(errmsg);
@@ -958,10 +868,10 @@ int DatabaseIO::RankInit()
   {
     std::cout << "read" << std::endl;
     // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = ad_wrapper.InquireAttribute<unsigned int>(schema_version_string);
+    auto schema_version = ad_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
     if (!schema_version) {
       std::ostringstream errmsg;
-      errmsg << "ERROR: schema_version_string not found.\n";
+      errmsg << "ERROR: Schema_version_string not found.\n";
       IOSS_ERROR(errmsg);
     }
     // Get all variables
@@ -977,7 +887,7 @@ int DatabaseIO::RankInit()
       std::tie(field_name, meta) = ad_wrapper.DecodeMetaName(field_name);
       // We know this set of keys is unique as it is decoded from the variable name
       // and two varaibles cannot have the same name. Do not save meta-variables.
-      if(meta.empty()) {
+      if (meta.empty()) {
         variables_map[entity_type][entity_name][field_name] =
             std::make_pair(name, vpair.second.at("Type"));
       }
@@ -1051,13 +961,11 @@ int DatabaseIO::RankInit()
                                          void *data, size_t data_size) const
   {
     return get_field_internal(sb->type_string(), sb->name(), field, data, data_size);
-
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
     return get_field_internal(ns->type_string(), ns->name(), field, data, data_size);
-
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
@@ -1067,7 +975,7 @@ int DatabaseIO::RankInit()
   int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-     return get_field_internal(fs->type_string(), fs->name(), field, data, data_size);
+    return get_field_internal(fs->type_string(), fs->name(), field, data, data_size);
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
@@ -1131,7 +1039,7 @@ int DatabaseIO::RankInit()
       std::cout << "Get:" << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
       ad_wrapper.Get<T>(entities, rdata,
-                       adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       return num_to_get;
     }
     return 0;
