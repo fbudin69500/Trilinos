@@ -202,17 +202,17 @@ namespace Ioad {
       void            BeginStep();
       void            EndStep();
       template <typename T>
-      void DefineMetaVariable(std::string meta_name, std::string variable_name);
+      void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name="");
       template <typename T>
-      void PutMetaVariable(std::string meta_name, T value, std::string variable_name) const;
+      void PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name="") const;
       template <typename T>
-      T GetMetaVariable(std::string meta_name, std::string variable_name) const;
+      T GetMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
       std::pair<std::string, std::string> decode_meta_name(std::string name) const;
 
     private:
       adios2::IO     IOInit() const;
       adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
-      std::string    EncodeMetaVariable(std::string meta_name, std::string variable_name) const;
+      std::string    EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name="") const;
 
       const std::string m_MetaSeparator = "::";
       const std::string m_IOName        = "io";
@@ -231,6 +231,8 @@ namespace Ioad {
     //                      std::map<std::string, std::pair<std::string, std::string>>
     //                      field_names);
     int RankInit();
+    bool begin_state__(Ioss::Region * /* region */, int state, double time);
+    bool end_state__(Ioss::Region * /*region*/, int state, double time);
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;
@@ -244,6 +246,7 @@ namespace Ioad {
     const std::string                                  name_separator              = "/";
     const std::string                                  role_meta              = "role";
     const std::string                                  var_type_meta          = "var_type";
+    const std::string time_meta = "time";
     const std::map<std::string, std::set<std::string>> use_transformed_storage_map = {
         {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
         {"FaceBlock", {"connectivity_edge"}}};

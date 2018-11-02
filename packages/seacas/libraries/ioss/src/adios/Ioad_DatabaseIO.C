@@ -184,13 +184,18 @@ namespace Ioad {
     return m_BPIO;
   }
 
-  std::string DatabaseIO::ADIOSWrapper::EncodeMetaVariable(std::string meta_name, std::string variable_name) const
+  std::string DatabaseIO::ADIOSWrapper::EncodeMetaVariable(const std::string &meta_name, const std::string &variable_name) const
   {
-    return variable_name + m_MetaSeparator + meta_name;
+    if(!variable_name.empty()) {
+      return variable_name + m_MetaSeparator + meta_name;
+    }
+    else {
+      return meta_name;
+    }
   }
 
   template <typename T>
-  void DatabaseIO::ADIOSWrapper::DefineMetaVariable(std::string meta_name, std::string variable_name)
+  void DatabaseIO::ADIOSWrapper::DefineMetaVariable(const std::string &meta_name, const std::string &variable_name)
   {
     // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
     if(m_Rank==0) {
@@ -199,7 +204,7 @@ namespace Ioad {
   }
 
   template <typename T>
-  void DatabaseIO::ADIOSWrapper::PutMetaVariable(std::string meta_name, T value, std::string variable_name) const
+  void DatabaseIO::ADIOSWrapper::PutMetaVariable(const std::string &meta_name, T value, const std::string &variable_name) const
   {
     // Meta variables should only be declared and written by process of rank 0 to avoid any undefined behavior.
     if(m_Rank==0) {
@@ -208,7 +213,7 @@ namespace Ioad {
   }
 
   template <typename T>
-  T DatabaseIO::ADIOSWrapper::GetMetaVariable(std::string meta_name, std::string variable_name) const
+  T DatabaseIO::ADIOSWrapper::GetMetaVariable(const std::string &meta_name, const std::string &variable_name) const
   {
     T variable;
     m_BPEngine.Get<T>(EncodeMetaVariable(meta_name, variable_name), variable,
@@ -300,6 +305,30 @@ int DatabaseIO::RankInit()
 
     return true;
   }
+
+  bool DatabaseIO::begin_state__(Ioss::Region * /* region */, int state, double time)
+  {
+    time /= timeScaleFactor;
+
+    if (!is_input()) {
+      // Add time to adios -> define variable
+    }
+    else {
+      // TODO: Figure out if something needs to be done here.
+      // Store reduction variables
+      //read_reduction_fields();
+    }
+  }
+
+  // common
+  bool DatabaseIO::end_state__(Ioss::Region * /*region*/, int state, double time)
+  {
+    // TODO: Only worry about this is we care about `last_written_time`. We may not care about this,
+    // this might be something that only exodus wants to do, but not ADIOS.
+    return true;
+  }
+
+
 
   bool DatabaseIO::use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                            const std::string &field_name) const
@@ -486,6 +515,9 @@ int DatabaseIO::RankInit()
       }
       define_entity_internal<Ioss::SideBlockContainer>(sblocks, role);
     }
+
+    // Define global variables
+    ad_wrapper.DefineMetaVariable<double>(time_meta);
   }
 
   //------------------------------------------------------------------------
