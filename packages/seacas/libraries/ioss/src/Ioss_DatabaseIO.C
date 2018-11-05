@@ -228,6 +228,9 @@ namespace Ioss {
 
   DatabaseIO::~DatabaseIO() = default;
 
+  void DatabaseIO::set_time_scale_factor(double factor) {
+       timeScaleFactor = factor;
+    }
   int DatabaseIO::int_byte_size_api() const
   {
     if (dbIntSizeAPI == USE_INT32_API) {

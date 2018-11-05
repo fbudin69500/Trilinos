@@ -107,7 +107,10 @@ namespace {
   const std::string                                  Name_separator        = "/";
   const std::string                                  Role_meta             = "role";
   const std::string                                  Var_type_meta         = "var_type";
+  const std::string                                  Time_scale_factor     = "timeScaleFactor";
   const std::string                                  Time_meta             = "time";
+  const std::string                                  globals_entity_type   = "globals";
+  const std::string                                  globals_entity_name   = "";
   const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
       {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
       {"FaceBlock", {"connectivity_edge"}}};
@@ -276,11 +279,17 @@ namespace Ioad {
       current  = encoded_name.find_first_of(Name_separator, previous);
     }
     container.push_back(encoded_name.substr(previous, current - previous));
-    if (container.size() != 3) {
+    if (container.size() == 1) {
+      // Special case for global variables.
+      return make_tuple(globals_entity_type, globals_entity_name, container[0]);
+    }
+    else if (container.size() != 3) {
+      // There is a problem as there should be 1 or 3 variables found in the encoded name.
       std::ostringstream errmsg;
       errmsg << "ERROR: Invalid encoded entity name. Does not contain 2 separators.\n";
       IOSS_ERROR(errmsg);
     }
+    // 3 names found:
     return make_tuple(container[0], container[1], container[2]);
   }
 
@@ -404,6 +413,7 @@ namespace Ioad {
 
   void DatabaseIO::define_global_variables()
   {
+    adios_wrapper.DefineAttribute<double>(Time_scale_factor, timeScaleFactor);
     adios_wrapper.DefineMetaVariable<double>(Time_meta);
   }
 
@@ -670,6 +680,18 @@ namespace Ioad {
     return BlockInfoType();
   }
 
+  template<typename T>
+  T DatabaseIO::get_attribute(const std::string &attribute_name)
+  {
+    adios2::Attribute<T> attribute = adios_wrapper.InquireAttribute<T>(attribute_name);
+    if(!attribute) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: " << attribute_name << " not found.\n";
+      IOSS_ERROR(errmsg);
+    }
+    return attribute.Data()[0];
+  }
+
   // common
   void DatabaseIO::get_nodeblocks(const VariableMapType &variables_map)
   {
@@ -677,8 +699,7 @@ namespace Ioad {
     // all of the nodes.
     // The default id assigned is '1' and the name is 'nodeblock_1'
     std::string entity_name = "NodeBlock";
-    const std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>
-        &       entity_map = variables_map.at(entity_name);
+    const EntityMapType &entity_map = variables_map.at(entity_name);
     std::string block_name = "nodeblock_1";
 
     // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
@@ -717,26 +738,6 @@ namespace Ioad {
       delete block;
     }
   }
-  // Check for results variables.
-
-  //   // int num_attr = 0;
-  //   // {
-  //   //   Ioss::SerializeIO serializeIO__(this);
-  //   //   int               ierr = ex_get_attr_param(get_file_pointer(), EX_NODE_BLOCK, 1,
-  //   //   &num_attr); if (ierr < 0) {
-  //   //     Ioex::exodus_error(get_file_pointer(), __LINE__, __func__, __FILE__);
-  //   //   }
-  //   // }
-  //   //    add_attribute_fields(block, size, variables[block_name]);
-  //   // add_attribute_fields(EX_NODE_BLOCK, block, num_attr, "");
-  //   // add_results_fields(EX_NODE_BLOCK, block);
-
-  //   bool added = get_region()->add(block);
-  //   if (!added) {
-  //     delete block;
-  //   }
-  //   // Load all fields listed in variables_map
-  // } // namespace Ioad
 
   template <typename T>
   DatabaseIO::BlockInfoType DatabaseIO::get_variable_infos(const std::string &var_name) const
@@ -812,53 +813,41 @@ namespace Ioad {
     return infos;
   }
 
-  //   void DatabaseIO::read_region(adios2::IO &bpio)
-  //   {
+  void DatabaseIO::get_globals(const EntityMapType &entity_map) {
+    // This should never happen as if there is a `globals` field added to the map, that means that
+    // there are global fields inside it.
+    assert(!entity_map.empty());
 
-  //     // Only get schema version attribute as it is the only one we expect.
-  //     auto schema_version = bpio.InquireAttribute<unsigned int>(Schema_version_string);
-  //     if (!schema_version) {
-  //       std::ostringstream errmsg;
-  //       errmsg << "INTERNAL ERROR: Schema_version_string not found. "
-  //              << "Something is wrong in the Ioad::DatabaseIO::read_region() function. "
-  //              << "Please check input file.\n";
-  //       IOSS_ERROR(errmsg);
-  //     }
-  //     // Fow now, we do not do anything special based on the schema version. It is only used to
-  //     check
-  //     // that the input file is in the expected format.
-
-  //     for (const auto &vpair : variables) {
-  //       const std::string &name = vpair.first;
-  //       std::cout << "name:" << name << std::endl;
-
-  //       std::cout << "type:" << vpair.second.at("Type") << std::endl;
-  //       std::cout << "shape:" << vpair.second.at("Shape") << std::endl;
-  //       std::cout << "step counts:" << vpair.second.at("AvailableStepsCount") << std::endl;
-
-  //       // Simply to start the "else if" section with "if".
-  //       if (vpair.second.at("Type") == "not supported") {
-  //       }
-  // #define declare_template_instantiation(T)                             \
-//   else if (vpair.second.at("Type") == adios2::helper::GetType<T>()) { \
-//       read_variable_size<T>(bpio, vpair);                             \
-//       }
-  //       ADIOS2_FOREACH_TYPE_1ARG(declare_template_instantiation)
-  // #undef declare_template_instantiation
-  //     std::cout<<"vvvvvvvvvvvvvvvv"<<std::endl;
-  //     // Once everything is loaded, get global variables such as spatialDimension.
-  //     }
-  //   }
+    timeScaleFactor = get_attribute<double>(Time_scale_factor);
+    Ioss::SerializeIO serializeIO__(this);
+    Ioss::Region *this_region = get_region();
+    auto globals_map = entity_map.at(globals_entity_name);
+    if (globals_map.find(Time_meta) != globals_map.end()) {
+      // Load time steps
+      // 1) Check that the time type is `double` as expected.
+      adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
+      std::vector<double> tsteps(1);
+      if(time_var) {
+        for (size_t step = 0; step < time_var.Steps(); step++) {
+          //if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
+            time_var.SetStepSelection(std::make_pair(step,1));
+            adios_wrapper.Get(time_var, tsteps.data());
+            this_region->add_state__(tsteps[0] * timeScaleFactor);
+          }
+      }
+      else {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Timestep global detected in file but cannot read it.\n";
+        IOSS_ERROR(errmsg);
+      }
+    }
+  }
 
   void DatabaseIO::read_meta_data__()
   {
     // Only get schema version attribute as it is the only one we expect.
-    auto schema_version = adios_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
-    if (!schema_version) {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: Schema_version_string not found.\n";
-      IOSS_ERROR(errmsg);
-    }
+    get_attribute<unsigned int>(Schema_version_string);
+
     // Get all variables
     VariableMapType variables_map;
 
@@ -882,6 +871,7 @@ namespace Ioad {
     // read_communication_metadata();
 
     // get_step_times__();
+    get_globals(variables_map[globals_entity_type]);
     get_nodeblocks(variables_map);
     // get_edgeblocks();
     // get_faceblocks();

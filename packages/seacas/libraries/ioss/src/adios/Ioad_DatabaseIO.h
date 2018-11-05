@@ -139,7 +139,9 @@ namespace Ioad {
                                const Ioss::Field &field, void *data, size_t data_size) const;
     void    read_meta_data__() override;
     void    define_model(Ioss::Field::RoleType *role = nullptr);
+    // Model definition that should not be re-defined when defining transient variables.
     void    define_global_variables();
+    template<typename T>  T get_attribute(const std::string &attribute_name);
     // void read_region(adios2::IO & bpio);
 
     int64_t element_global_to_local__(int64_t global) const { return 0; }
@@ -187,6 +189,8 @@ namespace Ioad {
     decode_field_name(const std::string &encoded_name) const;
 
     void get_nodeblocks(const VariableMapType &variables);
+    void get_globals(const EntityMapType &entity_map);
+
 
     // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
     // size,

@@ -471,7 +471,7 @@ namespace Ioss {
     void set_file_per_state(bool yes_no) const { filePerState = yes_no; }
     bool get_file_per_state() const { return filePerState; }
 
-    void set_time_scale_factor(double factor) { timeScaleFactor = factor; }
+    void set_time_scale_factor(double factor);
 
     const Ioss::ParallelUtils &  util() const { return util_; }
     const Ioss::PropertyManager &get_property_manager() const { return properties; }
