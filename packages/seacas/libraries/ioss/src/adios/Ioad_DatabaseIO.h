@@ -36,6 +36,8 @@
 
 #include <Ioss_DBUsage.h>
 #include <Ioss_DatabaseIO.h>
+#include "Ioss_EntitySet.h"
+
 
 #include "Ioss_Field.h" // for Field, etc
 #include <AdiosWrapper.h>
@@ -153,6 +155,9 @@ namespace Ioad {
     template <typename T>
     int64_t put_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
                      bool transformed_field, size_t data_size) const;
+    template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
+    void put_var_type(const Ioss::Field &field, const std::string &encoded_name,
+                      bool transformed_field) const;
     template <typename T>
     void define_model_internal(const Ioss::Field &field, const std::string &encoded_name,
                                const std::string &entity_type, const std::string &field_name);
@@ -180,23 +185,31 @@ namespace Ioad {
 
     template <typename T>
     BlockInfoType
-                  get_variable_infos_from_map(const EntityMapType &variables_map, const std::string &entity_name,
-                                              const std::string &block_name, const std::string &var_name) const;
+                  get_variable_infos_from_map(const EntityMapType &variables_map, const std::string &entity_type,
+                                              const std::string &entity_name, const std::string &var_name) const;
     BlockInfoType get_variable_infos_from_map_no_check(const EntityMapType &variables_map,
+                                                       const std::string &  entity_type,
                                                        const std::string &  entity_name,
-                                                       const std::string &  block_name,
                                                        const std::string &  var_name) const;
 
     std::string encode_field_name(const std::string &entity_type, const std::string &entity_name,
                                   const std::string &field_name) const;
-    std::tuple<std::string, std::string, std::string>
-    decode_field_name(const std::string &encoded_name) const;
+    std::string encode_sideblock_name(std::string type_string, std::string name) const;
+    bool is_sideblock_name(std::string name) const;
 
     template <typename T>
-    void get_blocks(const VariableMapType &variables_map, const std::string &entity_name);
-    // template <>
-    // void get_blocks<Ioss::NodeBlock>(const VariableMapType &variables_map,
-    //                                  const std::string &    entity_name);
+    const std::string get_entity_type();
+    template <typename T>
+    void get_entities(const VariableMapType &variables_map);
+
+    template <typename T>
+    typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+    NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &/*entity_type*/,
+              size_t entity_count);
+    template <typename T>
+    typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+    NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type,
+              size_t entity_count);
 
     void get_globals(const VariableMapType &variables_map);
 
