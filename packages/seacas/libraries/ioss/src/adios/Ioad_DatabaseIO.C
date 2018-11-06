@@ -44,6 +44,7 @@
 #include "Ioss_GroupingEntity.h"  // for GroupingEntity
 #include "Ioss_Map.h"             // for Map, MapContainer
 #include "Ioss_NodeBlock.h"       // for NodeBlock
+//#include "Ioss_StructuredBlock.h" // for StructuredBlock
 #include "Ioss_NodeSet.h"         // for NodeSet
 #include "Ioss_Property.h"        // for Property
 #include "Ioss_Region.h"          // for Region, SideSetContainer, etc
@@ -230,15 +231,13 @@ namespace Ioad {
   }
 
   template <typename T>
-  void DatabaseIO::define_model_internal(const Ioss::Field &field, const std::string &encoded_name)
+  void DatabaseIO::define_model_internal(const Ioss::Field &field, const std::string &encoded_name,
+                                         const std::string &entity_type,
+                                         const std::string &field_name)
   {
-    size_t      component_count;
-    size_t      local_size;
-    std::string entity_type, field_name;
-    std::tie(entity_type, std::ignore, field_name) = decode_field_name(encoded_name);
-    if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
-      return;
-    }
+    size_t component_count;
+    size_t local_size;
+
     if (use_transformed_storage(field, entity_type, field_name)) {
       component_count = field.transformed_storage()->component_count();
       local_size      = field.transformed_count();
@@ -248,7 +247,7 @@ namespace Ioad {
       local_size      = field.raw_count();
     }
     adios_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
-                                 {rank, 0, 0}, {1, local_size, component_count});
+                                    {rank, 0, 0}, {1, local_size, component_count});
 
     adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
     adios_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
@@ -302,6 +301,10 @@ namespace Ioad {
       std::string entity_name = entity_blocks[0]->name();
       entity_block->field_describe(&field_names);
       for (auto field_name : field_names) {
+        // Skip ignored fields
+        if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
+          continue;
+        }
         // Define entity block variables
         auto field = entity_block->get_fieldref(field_name);
         if (role && field.get_role() != *role) {
@@ -313,19 +316,19 @@ namespace Ioad {
         // but commented out to compile.
         // case Ioss::Field::BasicType::REAL:
         case Ioss::Field::BasicType::DOUBLE:
-          define_model_internal<double>(field, encoded_name);
+          define_model_internal<double>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::INT32:
-          define_model_internal<int32_t>(field, encoded_name);
+          define_model_internal<int32_t>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::INT64:
-          define_model_internal<int64_t>(field, encoded_name);
+          define_model_internal<int64_t>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::COMPLEX:
-          define_model_internal<Complex>(field, encoded_name);
+          define_model_internal<Complex>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::CHARACTER:
-          define_model_internal<char>(field, encoded_name);
+          define_model_internal<char>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::STRING:
           adios_wrapper.DefineVariable<std::string>(
@@ -406,6 +409,13 @@ namespace Ioad {
           adios_wrapper.InquireVariable<std::string>(encoded_name);
       if (!sblocks_var) {
         adios_wrapper.DefineVariable<std::string>(encoded_name);
+        std::string stringified_sblock_names;
+        for (auto sblock : sblocks) {
+          stringified_sblock_names += Name_separator + sblock->name();
+        }
+        adios_wrapper.Put<std::string>(
+            encoded_name, stringified_sblock_names,
+            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       }
       define_entity_internal<Ioss::SideBlockContainer>(sblocks, role);
     }
@@ -443,7 +453,7 @@ namespace Ioad {
     if (entities && data && data_size) {
       T *rdata = static_cast<T *>(data);
       adios_wrapper.Put<T>(entities, rdata,
-                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
 
       adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
       std::string var_type =
@@ -680,11 +690,10 @@ namespace Ioad {
     return BlockInfoType();
   }
 
-  template<typename T>
-  T DatabaseIO::get_attribute(const std::string &attribute_name)
+  template <typename T> T DatabaseIO::get_attribute(const std::string &attribute_name)
   {
     adios2::Attribute<T> attribute = adios_wrapper.InquireAttribute<T>(attribute_name);
-    if(!attribute) {
+    if (!attribute) {
       std::ostringstream errmsg;
       errmsg << "ERROR: " << attribute_name << " not found.\n";
       IOSS_ERROR(errmsg);
@@ -692,15 +701,14 @@ namespace Ioad {
     return attribute.Data()[0];
   }
 
-  // common
-  void DatabaseIO::get_nodeblocks(const VariableMapType &variables_map)
+  template<>
+  void DatabaseIO::get_blocks<Ioss::NodeBlock>(const VariableMapType &variables_map, const std::string &entity_name )
   {
     // For exodusII, there is only a single node block which contains
     // all of the nodes.
     // The default id assigned is '1' and the name is 'nodeblock_1'
-    std::string entity_name = "NodeBlock";
-    const EntityMapType &entity_map = variables_map.at(entity_name);
-    std::string block_name = "nodeblock_1";
+    const EntityMapType &entity_map  = variables_map.at(entity_name);
+    std::string          block_name  = "nodeblock_1";
 
     // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
     std::string coord_var_name = "mesh_model_coordinates";
@@ -736,6 +744,40 @@ namespace Ioad {
     bool added = get_region()->add(block);
     if (!added) {
       delete block;
+    }
+  }
+
+  template<typename T>
+  void DatabaseIO::get_blocks(const VariableMapType &variables_map, const std::string &entity_name)
+  {
+    if (variables_map.find(entity_name) == variables_map.end()) {
+      return;
+    }
+
+    const EntityMapType &entity_map = variables_map.at(entity_name);
+    for (auto &entity_block : entity_map) {
+      std::string entity_block_name = entity_block.first;
+      // Get size and type info for the block using the first element in the map.
+      BlockInfoType first_field_infos = get_variable_infos_from_map_no_check(
+          entity_map, entity_name, entity_block_name, entity_block.second.begin()->first);
+      T* block = new T(this, entity_block_name, first_field_infos.variable_type,
+                                       first_field_infos.node_boundaries_size);
+      for (auto &variable_pair : entity_block.second) {
+        // Since some fields are created automatically, we need to avoid recreating them when
+        // loading the file.
+        // Note: We get the information about the first field twice: once before this loop, and
+        // once inside the loop. The code could be modified to perform this action only once but
+        // most likely the code will be more complex and will not save a lot of computation time.
+        if (!block->field_exists(variable_pair.first)) {
+          BlockInfoType infos = get_variable_infos_from_map_no_check(
+              entity_map, entity_name, entity_block_name, variable_pair.first);
+          // TODO: Should we have a sanity check to verify that the field size is the same as
+          // the block size?
+          Ioss::Field field(variable_pair.first, infos.basic_type, infos.variable_type, infos.role,
+                            infos.node_boundaries_size);
+          block->field_add(field);
+        }
+      }
     }
   }
 
@@ -788,8 +830,8 @@ namespace Ioad {
         IOSS_ERROR(errmsg);
       }
       // Only query the block size of the current process based on the process rank.
-      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count of
-      // node count for this variable. Dimension=2 encodes the number of components for this
+      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
+      // of node count for this variable. Dimension=2 encodes the number of components for this
       // variables, and should always start at 0;
       size_t block_component_count       = blocks[rank].Count[2];
       size_t block_node_boundaries_start = blocks[rank].Start[1];
@@ -813,27 +855,30 @@ namespace Ioad {
     return infos;
   }
 
-  void DatabaseIO::get_globals(const EntityMapType &entity_map) {
+  void DatabaseIO::get_globals(const VariableMapType &variables_map)
+  {
+    const EntityMapType &entity_map = variables_map.at(globals_entity_type);
+
     // This should never happen as if there is a `globals` field added to the map, that means that
     // there are global fields inside it.
     assert(!entity_map.empty());
 
     timeScaleFactor = get_attribute<double>(Time_scale_factor);
     Ioss::SerializeIO serializeIO__(this);
-    Ioss::Region *this_region = get_region();
-    auto globals_map = entity_map.at(globals_entity_name);
+    Ioss::Region *    this_region = get_region();
+    auto              globals_map = entity_map.at(globals_entity_name);
     if (globals_map.find(Time_meta) != globals_map.end()) {
       // Load time steps
       // 1) Check that the time type is `double` as expected.
       adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
-      std::vector<double> tsteps(1);
-      if(time_var) {
+      std::vector<double>      tsteps(1);
+      if (time_var) {
         for (size_t step = 0; step < time_var.Steps(); step++) {
-          //if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
-            time_var.SetStepSelection(std::make_pair(step,1));
-            adios_wrapper.Get(time_var, tsteps.data());
-            this_region->add_state__(tsteps[0] * timeScaleFactor);
-          }
+          // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
+          time_var.SetStepSelection(std::make_pair(step, 1));
+          adios_wrapper.Get(time_var, tsteps.data());
+          this_region->add_state__(tsteps[0] * timeScaleFactor);
+        }
       }
       else {
         std::ostringstream errmsg;
@@ -871,9 +916,12 @@ namespace Ioad {
     // read_communication_metadata();
 
     // get_step_times__();
-    get_globals(variables_map[globals_entity_type]);
-    get_nodeblocks(variables_map);
-    // get_edgeblocks();
+    get_globals(variables_map);
+    get_blocks<Ioss::NodeBlock>(variables_map, "NodeBlock");
+    get_blocks<Ioss::EdgeBlock>(variables_map, "EdgeBlock");
+    get_blocks<Ioss::FaceBlock>(variables_map, "FaceBlock");
+    //get_blocks<Ioss::SideBlock>(variables_map, "SideBlock");
+    get_blocks<Ioss::ElementBlock>(variables_map, "ElementBlock");
     // get_faceblocks();
     // get_elemblocks();
 
@@ -924,12 +972,6 @@ namespace Ioad {
                                          void *data, size_t data_size) const
   {
     return get_field_internal(eb->type_string(), eb->name(), field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    throw "Not implemented yet";
-    return 0;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
@@ -1011,17 +1053,10 @@ namespace Ioad {
     if (entities && data && data_size) {
       T *rdata = static_cast<T *>(data);
       adios_wrapper.Get<T>(entities, rdata,
-                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       return num_to_get;
     }
     return 0;
   }
-
-  // int64_t DatabaseIO::put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field
-  // &field,
-  //                                        void *data, size_t data_size) const
-  // {
-  //   put_field_internal(sb->type_string(), field, data, data_size);
-  // }
 
 } // namespace Ioad

@@ -84,7 +84,10 @@ namespace Ioad {
     int64_t get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
     int64_t get_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                               void *data, size_t data_size) const override;
+                               void *data, size_t data_size) const override
+    {
+      return -1;
+    }
     int64_t get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
     int64_t get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field, void *data,
@@ -133,7 +136,7 @@ namespace Ioad {
     int64_t put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
                                void *data, size_t data_size) const override
     {
-      return 0;
+      return -1;
     }
     int64_t put_field_internal(const std::string &entity_type, const std::string &entity_name,
                                const Ioss::Field &field, void *data, size_t data_size) const;
@@ -151,7 +154,8 @@ namespace Ioad {
     int64_t put_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
                      bool transformed_field, size_t data_size) const;
     template <typename T>
-    void define_model_internal(const Ioss::Field &field, const std::string &encoded_name);
+    void define_model_internal(const Ioss::Field &field, const std::string &encoded_name,
+                               const std::string &entity_type, const std::string &field_name);
     template <typename T>
     void define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role);
 
@@ -188,9 +192,13 @@ namespace Ioad {
     std::tuple<std::string, std::string, std::string>
     decode_field_name(const std::string &encoded_name) const;
 
-    void get_nodeblocks(const VariableMapType &variables);
-    void get_globals(const EntityMapType &entity_map);
+    template <typename T>
+    void get_blocks(const VariableMapType &variables_map, const std::string &entity_name);
+    // template <>
+    // void get_blocks<Ioss::NodeBlock>(const VariableMapType &variables_map,
+    //                                  const std::string &    entity_name);
 
+    void get_globals(const VariableMapType &variables_map);
 
     // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
     // size,
