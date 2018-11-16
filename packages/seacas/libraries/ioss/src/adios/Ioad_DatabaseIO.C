@@ -436,51 +436,6 @@ namespace Ioad {
     }
   }
 
-  // template <typename T>
-  // void typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-  // DatabaseIO::put_metadata()
-  // {
-    
-  // }
-
-  // // Does not work for NodeBlock. Directly use NodeBlock constructor for NodeBlock
-  // // objects.
-  // template <typename T>
-  // typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-  // DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-  //                       const std::string &entity_type, size_t entity_count)
-  // {
-  //   return new T(io_database, my_name, entity_type, entity_count);
-  // }
-
-  template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
-  void
-  DatabaseIO::put_var_type(const Ioss::Field &field, const std::string &encoded_name, bool transformed_field) const
-  {
-    std::string var_type =
-          transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
-      adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
-  }
-
-  template <typename T>
-  int64_t DatabaseIO::put_data(const Ioss::Field &field, void *data,
-                               const std::string &encoded_name, bool transformed_field,
-                               size_t data_size) const
-  {
-    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
-    int                 num_to_get = field.verify(data_size);
-
-    if (entities && data && data_size) {
-      T *rdata = static_cast<T *>(data);
-      adios_wrapper.Put<T>(entities, rdata,
-                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-
-      adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
-      put_var_type<T>(field, encoded_name, transformed_field);
-      return num_to_get;
-    }
-    return 0;
-  }
 
   // TODO: write actual code!
   // Returns byte size of integers stored on the database...
@@ -491,6 +446,7 @@ namespace Ioad {
   {
     return put_field_internal(nb->type_string(), nb->name(), field, data, data_size);
   }
+
 
   int DatabaseIO::find_field_in_mapset(
       const std::string &entity_type, const std::string &field_name,
@@ -507,42 +463,70 @@ namespace Ioad {
     return 0;
   }
 
+  template <typename T>
+  void DatabaseIO::put_data(const Ioss::Field &field, void *data,
+                               const std::string &encoded_name) const
+  {
+    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
+    if (entities) {
+      T *rdata = static_cast<T *>(data);
+      adios_wrapper.Put<T>(entities, rdata,
+                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+    }
+    else {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Could not find variable '" << encoded_name << "'\n";
+        IOSS_ERROR(errmsg);
+    }
+  }
+
   int64_t DatabaseIO::put_field_internal(const std::string &entity_type,
                                          const std::string &entity_name, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    if (!data || !data_size) {
+      return 0;
+    }
     const std::string &field_name = field.get_name();
     if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return 0;
     }
 
-    std::string encoded_name      = encode_field_name(entity_type, entity_name, field_name);
-    bool        transformed_field = use_transformed_storage(field, entity_type, field_name);
+    int num_to_get = field.verify(data_size);
+    if (num_to_get > 0) {
 
-    switch (field.get_type()) {
-    case Ioss::Field::BasicType::DOUBLE:
-      return put_data<double>(field, data, encoded_name, transformed_field, data_size);
-      break;
-    case Ioss::Field::BasicType::INT32:
-      return put_data<int32_t>(field, data, encoded_name, transformed_field, data_size);
-      break;
-    case Ioss::Field::BasicType::INT64:
-      return put_data<int64_t>(field, data, encoded_name, transformed_field, data_size);
-      break;
-    case Ioss::Field::BasicType::COMPLEX:
-      return put_data<Complex>(field, data, encoded_name, transformed_field, data_size);
-      break;
-    case Ioss::Field::BasicType::CHARACTER:
-      return put_data<char>(field, data, encoded_name, transformed_field, data_size);
-      break;
-    default:
-      std::ostringstream errmsg;
-      errmsg << "INTERNAL ERROR: Invalid field type. "
-             << "Something is wrong in the Ioad::DatabaseIO::put_field_internal() function. "
-             << "Please report.\n";
-      IOSS_ERROR(errmsg);
+      std::string encoded_name      = encode_field_name(entity_type, entity_name, field_name);
+      bool        transformed_field = use_transformed_storage(field, entity_type, field_name);
+      int64_t     result            = 0;
+      switch (field.get_type()) {
+      case Ioss::Field::BasicType::DOUBLE:
+        put_data<double>(field, data, encoded_name);
+        break;
+      case Ioss::Field::BasicType::INT32:
+        put_data<int32_t>(field, data, encoded_name);
+        break;
+      case Ioss::Field::BasicType::INT64:
+        put_data<int64_t>(field, data, encoded_name);
+        break;
+      case Ioss::Field::BasicType::COMPLEX:
+        put_data<Complex>(field, data, encoded_name);
+        break;
+      case Ioss::Field::BasicType::CHARACTER:
+        put_data<char>(field, data, encoded_name);
+        break;
+      default:
+        std::ostringstream errmsg;
+        errmsg << "INTERNAL ERROR: Invalid field type. "
+               << "Something is wrong in the Ioad::DatabaseIO::put_field_internal() function. "
+               << "Please report.\n";
+        IOSS_ERROR(errmsg);
+      }
+      adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
+      std::string var_type =
+          transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
+      adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
     }
-    return 0;
+    return num_to_get;
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,

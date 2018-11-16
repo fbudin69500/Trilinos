@@ -153,8 +153,7 @@ namespace Ioad {
     int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
 
     template <typename T>
-    int64_t put_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
-                     bool transformed_field, size_t data_size) const;
+    void put_data(const Ioss::Field &field, void *data, const std::string &encoded_name) const;
     template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
     void put_var_type(const Ioss::Field &field, const std::string &encoded_name,
                       bool transformed_field) const;
