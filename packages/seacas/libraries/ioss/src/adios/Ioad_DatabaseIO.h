@@ -201,14 +201,24 @@ namespace Ioad {
     template <typename T>
     void get_entities(const VariableMapType &variables_map);
 
-    template <typename T>
-    typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-    NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &/*entity_type*/,
-              size_t entity_count);
-    template <typename T>
-    typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-    NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type,
-              size_t entity_count);
+    // template <typename T>
+    // typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+    // NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &/*entity_type*/,
+    //           size_t entity_count);
+    // template <typename T>
+    // typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+    // NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type,
+    //           size_t entity_count);
+
+  template <typename T>
+  auto
+  NewEntity(DatabaseIO *io_database, const std::string &my_name,
+                        const std::string &/*entity_type*/, size_t entity_count)
+  -> decltype(T(io_database, my_name, entity_count)) * ;
+
+  template <typename T>
+  auto NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type, size_t entity_count)
+  -> decltype(T(io_database, my_name, entity_type, entity_count)) *;
 
     void get_globals(const VariableMapType &variables_map);
 

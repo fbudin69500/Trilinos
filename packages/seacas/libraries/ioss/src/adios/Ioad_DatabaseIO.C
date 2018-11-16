@@ -855,25 +855,42 @@ namespace Ioad {
     }
   }
 
-  // Takes an extra unused parameter "entity_type" to match the API of the function
-  // "NewEntity" used for objects that are not EntitySets which require that parameter.
-  // Having matching APIs allows to call this function from generic templated functions
-  // that do not have to be specialized to call this function with a different number of
-  // parameters.
+  // // Takes an extra unused parameter "entity_type" to match the API of the function
+  // // "NewEntity" used for objects that are not EntitySets which require that parameter.
+  // // Having matching APIs allows to call this function from generic templated functions
+  // // that do not have to be specialized to call this function with a different number of
+  // // parameters.
+  // template <typename T>
+  // typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+  // DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
+  //                       const std::string &/*entity_type*/, size_t entity_count)
+  // {
+  //   return new T(io_database, my_name, entity_count);
+  // }
+
+  // // Does not work for NodeBlock. Directly use NodeBlock constructor for NodeBlock
+  // // objects.
+  // template <typename T>
+  // typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+  // DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
+  //                       const std::string &entity_type, size_t entity_count)
+  // {
+  //   return new T(io_database, my_name, entity_type, entity_count);
+  // }
+
   template <typename T>
-  typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
+  auto
   DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
                         const std::string &/*entity_type*/, size_t entity_count)
+  -> decltype(T(io_database, my_name, entity_count)) *
   {
     return new T(io_database, my_name, entity_count);
   }
 
-  // Does not work for NodeBlock. Directly use NodeBlock constructor for NodeBlock
-  // objects.
   template <typename T>
-  typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-  DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
+  auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
                         const std::string &entity_type, size_t entity_count)
+  -> decltype(T(io_database, my_name, entity_type, entity_count)) *
   {
     return new T(io_database, my_name, entity_type, entity_count);
   }
