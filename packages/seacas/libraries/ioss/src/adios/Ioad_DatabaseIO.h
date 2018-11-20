@@ -140,7 +140,8 @@ namespace Ioad {
     {
       return -1;
     }
-    int64_t put_field_internal(const std::string &entity_type, const std::string &entity_name,
+    template<typename T>
+    int64_t put_field_internal(const T *entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     void    read_meta_data__() override;
     void    define_model(Ioss::Field::RoleType *role = nullptr);
@@ -196,36 +197,53 @@ namespace Ioad {
     std::string encode_sideblock_name(std::string type_string, std::string name) const;
     bool is_sideblock_name(std::string name) const;
 
+
+    template<typename T>
+    using IsIossEntityBlock = typename std::enable_if<std::is_base_of<Ioss::EntityBlock, T>::value>::type;
+    template<typename T>
+    using IsNotIossEntityBlock = typename std::enable_if<!std::is_base_of<Ioss::EntityBlock, T>::value>::type;
+    template<typename T>
+    using CompareEntityBlock = typename std::conditional<std::is_base_of<Ioss::EntityBlock, T>::value, Ioss::EntityBlock, Ioss::GroupingEntity>::type;
+
+    template <typename T, typename = IsIossEntityBlock<T>>
+    void define_meta_variables(const std::string & encoded_name);
+    template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
+    void define_meta_variables(const std::string &);
+    template<typename T>
+    using PutMetaDataType = CompareEntityBlock<typename std::remove_const<typename std::remove_pointer<T>::type>::type>;
+    template <typename T, typename = IsIossEntityBlock<T>>
+    void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
+    template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
+    void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
+
+
     template <typename T>
     const std::string get_entity_type();
     template <typename T>
     void get_entities(const VariableMapType &variables_map);
 
-    // template <typename T>
-    // typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-    // NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &/*entity_type*/,
-    //           size_t entity_count);
-    // template <typename T>
-    // typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-    // NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type,
-    //           size_t entity_count);
+template<typename T>
+using DerivedFromIossGroupingEntity = typename std::enable_if<std::is_base_of<Ioss::GroupingEntity, T>::value, bool>::type;
+
+template <typename T>
+using IossHas3ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO*){}, std::string{},  int64_t{}));
+
+template <typename T>
+using IossHas4ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO*){}, std::string{}, std::string{}, int64_t{}));
 
   template <typename T>
   auto
   NewEntity(DatabaseIO *io_database, const std::string &my_name,
                         const std::string &/*entity_type*/, size_t entity_count)
-  -> decltype(T(io_database, my_name, entity_count)) * ;
+  -> IossHas3ParametersConstructor<T> *;
 
   template <typename T>
   auto NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type, size_t entity_count)
-  -> decltype(T(io_database, my_name, entity_type, entity_count)) *;
+  -> IossHas4ParametersConstructor<T> *;
 
     void get_globals(const VariableMapType &variables_map);
 
-    // void add_attribute_fields(Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>>
-    // size,
-    //                      std::map<std::string, std::pair<std::string, std::string>>
-    //                      field_names);
+
     int  RankInit();
     bool begin_state__(Ioss::Region * /* region */, int state, double time);
     bool end_state__(Ioss::Region * /*region*/, int state, double time);

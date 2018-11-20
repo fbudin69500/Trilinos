@@ -71,6 +71,8 @@ namespace Ioss {
 
 static const char *Version = "2018/06/22";
 
+namespace Ioad {
+
 namespace {
   template <typename T> Ioss::Field::BasicType template_to_basic_type()
   {
@@ -131,10 +133,8 @@ namespace {
       {"CommSet", {"ids"}},
       {"SideSet", {"ids"}},
       {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
-
 } // namespace
 
-namespace Ioad {
 
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
@@ -215,6 +215,7 @@ namespace Ioad {
       // Store reduction variables
       // read_reduction_fields();
     }
+    return true;
   }
 
   // common
@@ -237,6 +238,19 @@ namespace Ioad {
     return false;
   }
 
+  template <typename T, typename = DatabaseIO::IsIossEntityBlock<T>>
+  void DatabaseIO::define_meta_variables(const std::string &encoded_name)
+  {
+    adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
+    adios_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
+  }
+  
+  template <typename T, typename = DatabaseIO::IsNotIossEntityBlock<T>, typename = void>
+  void DatabaseIO::define_meta_variables(const std::string &)
+  {
+    // no op
+  }
+
   template <typename T>
   void DatabaseIO::define_model_internal(const Ioss::Field &field, const std::string &encoded_name,
                                          const std::string &entity_type,
@@ -255,9 +269,6 @@ namespace Ioad {
     }
     adios_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
                                     {rank, 0, 0}, {1, local_size, component_count});
-
-    adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
-    adios_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
   }
 
   std::string DatabaseIO::encode_field_name(const std::string &entity_type,
@@ -323,6 +334,8 @@ namespace Ioad {
               << "Please report.\n";
           IOSS_ERROR(errmsg);
         }
+        using DefineMetaDataType = CompareEntityBlock<typename std::remove_pointer<typename T::value_type>::type>;
+        define_meta_variables<DefineMetaDataType>(encoded_name);
       }
     }
   }
@@ -357,7 +370,6 @@ namespace Ioad {
     // A single nodeblock named "nodeblock_1" will be created for the mesh. It contains information
     // for every node that exists in the model (Ioss-exodus-mapping.pdf).
     assert(node_blocks.size() == 1);
-    // int spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
     adios2::Attribute<unsigned int> schema_attr =
         adios_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
@@ -422,6 +434,7 @@ namespace Ioad {
   }
 
   //------------------------------------------------------------------------
+  // TODO: Complete Region function
   int64_t DatabaseIO::put_field_internal(const Ioss::Region * /* region */,
                                          const Ioss::Field &field, void *data,
                                          size_t data_size) const
@@ -441,10 +454,11 @@ namespace Ioad {
   // Returns byte size of integers stored on the database...
   int DatabaseIO::int_byte_size_db() const { return 4; }
 
+
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(nb->type_string(), nb->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(nb)>>(nb, field, data, data_size);
   }
 
 
@@ -480,13 +494,31 @@ namespace Ioad {
     }
   }
 
-  int64_t DatabaseIO::put_field_internal(const std::string &entity_type,
-                                         const std::string &entity_name, const Ioss::Field &field,
+  template <typename T, typename = DatabaseIO::IsIossEntityBlock<T>>
+  void DatabaseIO::put_meta_variables(const std::string &encoded_name,
+                                      const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const
+  {
+    adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
+    bool        transformed_field = use_transformed_storage(field, entity_type, field_name);
+    std::string var_type =
+        transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
+    adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
+  }
+
+  template <typename T, typename = DatabaseIO::IsNotIossEntityBlock<T>, typename = void>
+  void DatabaseIO::put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const
+  {
+    // no op
+  }
+
+  template<typename T>
+  int64_t DatabaseIO::put_field_internal(const T *entity, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
     if (!data || !data_size) {
       return 0;
     }
+    std::string entity_type = entity->type_string();
     const std::string &field_name = field.get_name();
     if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return 0;
@@ -494,10 +526,7 @@ namespace Ioad {
 
     int num_to_get = field.verify(data_size);
     if (num_to_get > 0) {
-
-      std::string encoded_name      = encode_field_name(entity_type, entity_name, field_name);
-      bool        transformed_field = use_transformed_storage(field, entity_type, field_name);
-      int64_t     result            = 0;
+      std::string encoded_name      = encode_field_name(entity_type, entity->name(), field_name);
       switch (field.get_type()) {
       case Ioss::Field::BasicType::DOUBLE:
         put_data<double>(field, data, encoded_name);
@@ -521,10 +550,7 @@ namespace Ioad {
                << "Please report.\n";
         IOSS_ERROR(errmsg);
       }
-      adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
-      std::string var_type =
-          transformed_field ? field.transformed_storage()->name() : field.raw_storage()->name();
-      adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
+      put_meta_variables<T>(encoded_name, field, entity_type, field_name);
     }
     return num_to_get;
   }
@@ -532,55 +558,55 @@ namespace Ioad {
   int64_t DatabaseIO::put_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(eb->type_string(), eb->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(eb)>>(eb, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(eb->type_string(), eb->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(eb)>>(eb, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(fb->type_string(), fb->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(fb)>>(fb, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(sb->type_string(), sb->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(sb)>>(sb, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(ns->type_string(), ns->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(ns)>>(ns, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(es->type_string(), es->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(es)>>(es, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(fs->type_string(), fs->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(fs)>>(fs, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(es->type_string(), es->name(), field, data, data_size);
+    return put_field_internal<PutMetaDataType<decltype(es)>>(es, field, data, data_size);
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    int64_t res = put_field_internal(ss->type_string(), ss->name(), field, data, data_size);
+    int64_t res = put_field_internal<PutMetaDataType<decltype(ss)>>(ss, field, data, data_size);
     if (res) {
       std::string                   encoded_name = encode_field_name(ss->type_string(), ss->name(),
                                                    "sideblock_names" + std::to_string(rank));// TODO: remove rank since variable and not attribute.
@@ -605,46 +631,10 @@ namespace Ioad {
   int64_t DatabaseIO::put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return put_field_internal(cs->type_string(), cs->name(), field, data, data_size);
+    // TODO: Make sure that Commset should be handled like a "set" and not like a "block".
+    return put_field_internal<PutMetaDataType<decltype(cs)>>(cs, field, data, data_size);
   }
 
-  // template<typename T>
-  // create_nodeblock(std::string block_name, std::vector<typename adios2::Variable<T>::Info>
-  // blocks)
-  // {
-  // // Check number of nodeblocks/ids==1
-  // // Create nodeblock
-  // // Load data
-  // // Load other nodeblock fields
-  // }
-
-  // void DatabaseIO::add_attribute_fields(
-  //     Ioss::GroupingEntity *block, std::vector<std::pair<size_t, size_t>> size,
-  //     std::map<std::string, std::pair<std::string, std::string>> field_names)
-  // {
-  //   // Does not verify if name is correct based on IOSS requirements. Assumes that it is the
-  //   case. size_t my_element_count = block->entity_count();
-
-  //   // std::vector<Ioss::Field> attributes;
-  //   // Ioss::Utils::get_fields(my_element_count, field_names, Ioss::Field::ATTRIBUTE,
-  //   //                             get_field_recognition(), field_suffix_separator, nullptr,
-  //   //                             attributes);
-  //   //     int offset = 1;
-  //   //     for (const auto &field : attributes) {
-  //   //       if (block->field_exists(field.get_name())) {
-  //   //         std::ostringstream errmsg;
-  //   //         errmsg << "ERROR: In block '" << block->name() << "', attribute '" <<
-  //   //         field.get_name()
-  //   //                << "' is defined multiple times which is not allowed.\n";
-  //   //         IOSS_ERROR(errmsg);
-  //   //       }
-  //   //       block->field_add(field);
-  //   //       const Ioss::Field &tmp_field = block->get_fieldref(field.get_name());
-  //   //       tmp_field.set_index(offset);
-  //   //       offset += field.raw_storage()->component_count();
-  //   //     }
-  // }
-  
     template <typename T>
     const std::string DatabaseIO::get_entity_type()
     {
@@ -673,7 +663,7 @@ namespace Ioad {
     template <>
     const std::string DatabaseIO::get_entity_type<Ioss::SideBlock>()
     {
-      // default element is "hex8" because why not: We need an element type
+      // default element arbitrarily set to "hex8": We need an element type
       // to be able to construct this sideblock.
       Ioss::SideBlock sideblock(this, "", "node", "hex8", 0);
       return sideblock.type_string();
@@ -855,34 +845,16 @@ namespace Ioad {
     }
   }
 
-  // // Takes an extra unused parameter "entity_type" to match the API of the function
-  // // "NewEntity" used for objects that are not EntitySets which require that parameter.
-  // // Having matching APIs allows to call this function from generic templated functions
-  // // that do not have to be specialized to call this function with a different number of
-  // // parameters.
-  // template <typename T>
-  // typename std::enable_if<std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-  // DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-  //                       const std::string &/*entity_type*/, size_t entity_count)
-  // {
-  //   return new T(io_database, my_name, entity_count);
-  // }
-
-  // // Does not work for NodeBlock. Directly use NodeBlock constructor for NodeBlock
-  // // objects.
-  // template <typename T>
-  // typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type *
-  // DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-  //                       const std::string &entity_type, size_t entity_count)
-  // {
-  //   return new T(io_database, my_name, entity_type, entity_count);
-  // }
-
+  // Takes an extra unused parameter "entity_type" to match the API of the function
+  // "NewEntity" used for objects that are not EntitySets which require that parameter.
+  // Having matching APIs allows to call this function from generic templated functions
+  // that do not have to be specialized to call this function with a different number of
+  // parameters.
   template <typename T>
   auto
   DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
                         const std::string &/*entity_type*/, size_t entity_count)
-  -> decltype(T(io_database, my_name, entity_count)) *
+  -> IossHas3ParametersConstructor<T> *
   {
     return new T(io_database, my_name, entity_count);
   }
@@ -890,7 +862,7 @@ namespace Ioad {
   template <typename T>
   auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
                         const std::string &entity_type, size_t entity_count)
-  -> decltype(T(io_database, my_name, entity_type, entity_count)) *
+  -> IossHas4ParametersConstructor<T> *
   {
     return new T(io_database, my_name, entity_type, entity_count);
   }
@@ -915,18 +887,18 @@ namespace Ioad {
       if (!added) {
         delete entity;
       }
-      for (auto &variable_pair : variable_pair.second) {
+      for (auto &field_pair : variable_pair.second) {
         // Since some fields are created automatically, we need to avoid recreating them when
         // loading the file.
         // Note: We get the information about the first field twice: once before this loop, and
         // once inside the loop. The code could be modified to perform this action only once but
         // most likely the code will be more complex and will not save a lot of computation time.
-        if (!entity->field_exists(variable_pair.first)) {
+        if (!entity->field_exists(field_pair.first)) {
           BlockInfoType infos = get_variable_infos_from_map_no_check(
-              entity_map, entity_type, entity_name, variable_pair.first);
+              entity_map, entity_type, entity_name, field_pair.first);
           // TODO: Should we have a sanity check to verify that the field size is the same as
           // the entity size?
-          Ioss::Field field(variable_pair.first, infos.basic_type, infos.variable_type, infos.role,
+          Ioss::Field field(field_pair.first, infos.basic_type, infos.variable_type, infos.role,
                             infos.node_boundaries_size);
           entity->field_add(field);
         }
