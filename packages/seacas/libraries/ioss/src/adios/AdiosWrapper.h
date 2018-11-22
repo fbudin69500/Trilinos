@@ -23,6 +23,8 @@ namespace Ioad {
     template <typename T>
     T GetMetaVariable(const std::string &meta_name, const std::string &variable_name = "");
     std::pair<std::string, std::string> DecodeMetaName(std::string name) const;
+    std::string    EncodeMetaVariable(const std::string &meta_name,
+                                      const std::string &variable_name = "") const;
 
     using adios2::Engine::AllStepsBlocksInfo;
     using adios2::Engine::Get;
@@ -36,8 +38,7 @@ namespace Ioad {
   private:
     adios2::IO     IOInit();
     adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
-    std::string    EncodeMetaVariable(const std::string &meta_name,
-                                      const std::string &variable_name = "") const;
+
 
     const std::string m_MetaSeparator{"::"};
 

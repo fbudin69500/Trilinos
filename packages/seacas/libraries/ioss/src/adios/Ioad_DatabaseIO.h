@@ -105,7 +105,7 @@ namespace Ioad {
     int64_t get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
 
-    int64_t get_field_internal(const std::string &entity_type, const std::string &entity_name,
+    int64_t get_field_internal_t(const Ioss::GroupingEntity *entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     template <typename T>
     int64_t get_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
@@ -141,7 +141,7 @@ namespace Ioad {
       return -1;
     }
     template<typename T>
-    int64_t put_field_internal(const T *entity,
+    int64_t put_field_internal_t(T entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     void    read_meta_data__() override;
     void    define_model(Ioss::Field::RoleType *role = nullptr);
@@ -166,7 +166,7 @@ namespace Ioad {
 
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
-
+    
     struct BlockInfoType
     {
       std::vector<size_t>    steps;
@@ -176,24 +176,26 @@ namespace Ioad {
       Ioss::Field::RoleType  role;
       std::string            variable_type;
       Ioss::Field::BasicType basic_type;
+      std::string            topology;
+      std::string            parent_topology;
     };
 
     template <typename T> BlockInfoType get_variable_infos(const std::string &var_name) const;
+    using GlobalMapType = std::map<std::string, std::pair<std::string, std::string>>;
     using EntityMapType =
-        std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>;
-    using VariableMapType = std::map<std::string, EntityMapType>;
+        std::map<std::string, GlobalMapType>;
+    using FieldsMapType = std::map<std::string, EntityMapType>;
 
     template <typename T>
     BlockInfoType
-                  get_variable_infos_from_map(const EntityMapType &variables_map, const std::string &entity_type,
+                  get_expected_variable_infos_from_map(const EntityMapType &fields_map, const std::string &entity_type,
                                               const std::string &entity_name, const std::string &var_name) const;
-    BlockInfoType get_variable_infos_from_map_no_check(const EntityMapType &variables_map,
+    BlockInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
                                                        const std::string &  entity_type,
                                                        const std::string &  entity_name,
                                                        const std::string &  var_name) const;
 
-    std::string encode_field_name(const std::string &entity_type, const std::string &entity_name,
-                                  const std::string &field_name) const;
+    std::string encode_field_name(std::vector<std::string> names) const;
     std::string encode_sideblock_name(std::string type_string, std::string name) const;
     bool is_sideblock_name(std::string name) const;
 
@@ -205,22 +207,27 @@ namespace Ioad {
     template<typename T>
     using CompareEntityBlock = typename std::conditional<std::is_base_of<Ioss::EntityBlock, T>::value, Ioss::EntityBlock, Ioss::GroupingEntity>::type;
 
-    template <typename T, typename = IsIossEntityBlock<T>>
-    void define_meta_variables(const std::string & encoded_name);
-    template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
-    void define_meta_variables(const std::string &);
-    template<typename T>
-    using PutMetaDataType = CompareEntityBlock<typename std::remove_const<typename std::remove_pointer<T>::type>::type>;
-    template <typename T, typename = IsIossEntityBlock<T>>
-    void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
-    template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
+  template <typename T, typename = IsIossEntityBlock<T>>
+  void define_entity_meta_variables(const std::string &encoded_name);
+
+  template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
+  void define_entity_meta_variables(const std::string &encoded_name);
+
+
+    void define_field_meta_variables(const std::string &);
+    
     void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
 
+    void write_meta_data();
+
+    template <typename T>
+    void write_meta_data_t(const T &entity_blocks);
 
     template <typename T>
     const std::string get_entity_type();
     template <typename T>
-    void get_entities(const VariableMapType &variables_map);
+    void get_entities(const FieldsMapType &fields_map);
+    std::string get_optional_string_variable(const std::string &field_name, const std::string & string_variable) const;
 
 template<typename T>
 using DerivedFromIossGroupingEntity = typename std::enable_if<std::is_base_of<Ioss::GroupingEntity, T>::value, bool>::type;
@@ -241,7 +248,7 @@ using IossHas4ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{
   auto NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type, size_t entity_count)
   -> IossHas4ParametersConstructor<T> *;
 
-    void get_globals(const VariableMapType &variables_map);
+    void get_globals(const GlobalMapType &globals_map);
 
 
     int  RankInit();
