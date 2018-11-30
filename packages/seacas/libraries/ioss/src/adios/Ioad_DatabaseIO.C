@@ -32,20 +32,20 @@
 
 #include <tokenize.h>
 
-#include "Ioss_CommSet.h"         // for CommSet
-#include "Ioss_DBUsage.h"         // for DatabaseUsage, etc
-#include "Ioss_DatabaseIO.h"      // for DatabaseIO
-#include "Ioss_EdgeBlock.h"       // for EdgeBlock
-#include "Ioss_EdgeSet.h"         // for EdgeSet
-#include "Ioss_ElementBlock.h"    // for ElementBlock
-#include "Ioss_ElementSet.h"      // for ElementSet
-#include "Ioss_EntityType.h"      // for EntityType::ELEMENTBLOCK
-#include "Ioss_FaceBlock.h"       // for FaceBlock
-#include "Ioss_FaceSet.h"         // for FaceSet
-#include "Ioss_FileInfo.h"        // for FileInfo
-#include "Ioss_GroupingEntity.h"  // for GroupingEntity
-#include "Ioss_Map.h"             // for Map, MapContainer
-#include "Ioss_NodeBlock.h"       // for NodeBlock
+#include "Ioss_CommSet.h"        // for CommSet
+#include "Ioss_DBUsage.h"        // for DatabaseUsage, etc
+#include "Ioss_DatabaseIO.h"     // for DatabaseIO
+#include "Ioss_EdgeBlock.h"      // for EdgeBlock
+#include "Ioss_EdgeSet.h"        // for EdgeSet
+#include "Ioss_ElementBlock.h"   // for ElementBlock
+#include "Ioss_ElementSet.h"     // for ElementSet
+#include "Ioss_EntityType.h"     // for EntityType::ELEMENTBLOCK
+#include "Ioss_FaceBlock.h"      // for FaceBlock
+#include "Ioss_FaceSet.h"        // for FaceSet
+#include "Ioss_FileInfo.h"       // for FileInfo
+#include "Ioss_GroupingEntity.h" // for GroupingEntity
+#include "Ioss_Map.h"            // for Map, MapContainer
+#include "Ioss_NodeBlock.h"      // for NodeBlock
 //#include "Ioss_StructuredBlock.h" // for StructuredBlock
 #include "Ioss_NodeSet.h"         // for NodeSet
 #include "Ioss_Property.h"        // for Property
@@ -73,79 +73,81 @@ static const char *Version = "2018/06/22";
 
 namespace Ioad {
 
-namespace {
-  template <typename T> Ioss::Field::BasicType template_to_basic_type()
+  namespace {
+    template <typename T> Ioss::Field::BasicType template_to_basic_type()
+    {
+      return Ioss::Field::BasicType::INVALID;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<double>()
+    {
+      return Ioss::Field::BasicType::DOUBLE;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<int32_t>()
+    {
+      return Ioss::Field::BasicType::INT32;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<int64_t>()
+    {
+      return Ioss::Field::BasicType::INT64;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<Complex>()
+    {
+      return Ioss::Field::BasicType::COMPLEX;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<std::string>()
+    {
+      return Ioss::Field::BasicType::STRING;
+    }
+
+    template <> Ioss::Field::BasicType template_to_basic_type<char>()
+    {
+      return Ioss::Field::BasicType::CHARACTER;
+    }
+
+    // Constant variables
+    const std::string     Schema_version_string = "IOSS_adios_version";
+    const std::string     Sideblock_separator   = "::";
+    const std::string     Name_separator        = "/";
+    const std::string     Role_meta             = "role";
+    const std::string     Var_type_meta         = "var_type";
+    const std::string     Topology_meta         = "topology";
+    const std::string     property_meta         = "property_";
+    const std::string     Parent_topology_meta  = "parent_topology";
+    const std::string     Time_scale_factor     = "timeScaleFactor";
+    const std::string     Time_meta             = "time";
+    const std::string     globals_entity_type   = "globals";
+    const std::string     globals_entity_name   = "";
+    constexpr const char *sideblock_names       = "sideblock_names";
+    constexpr size_t      sideblock_names_size  = strlen(sideblock_names);
+    const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
+        {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
+        {"FaceBlock", {"connectivity_edge"}}};
+    const std::map<std::string, std::set<std::string>> Ignore_fields = {
+        {"NodeBlock",
+         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
+        {"ElementBlock", {"implicit_ids"}},
+        {"FaceBlock", {"connectivity_raw"}},
+        {"EdgeBlock", {"connectivity_raw"}},
+        {"CommSet", {"ids"}},
+        {"SideSet", {"ids"}},
+        {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
+    const std::vector<std::string> Ignore_properties = {{"name", "_base_stk_part_name", "db_name"}};
+  } // namespace
+
+  DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
+                         Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
+                         const Ioss::PropertyManager &properties_x)
+      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()),
+        adios_wrapper(communicator, filename, is_input(), rank)
   {
-    return Ioss::Field::BasicType::INVALID;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<double>()
-  {
-    return Ioss::Field::BasicType::DOUBLE;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<int32_t>()
-  {
-    return Ioss::Field::BasicType::INT32;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<int64_t>()
-  {
-    return Ioss::Field::BasicType::INT64;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<Complex>()
-  {
-    return Ioss::Field::BasicType::COMPLEX;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<std::string>()
-  {
-    return Ioss::Field::BasicType::STRING;
-  }
-
-  template <> Ioss::Field::BasicType template_to_basic_type<char>()
-  {
-    return Ioss::Field::BasicType::CHARACTER;
-  }
-
-  // Constant variables
-  const std::string                                  Schema_version_string = "IOSS_adios_version";
-  const std::string                                  Sideblock_separator   = "::";
-  const std::string                                  Name_separator        = "/";
-  const std::string                                  Role_meta             = "role";
-  const std::string                                  Var_type_meta         = "var_type";
-  const std::string                                  Topology_meta         = "topology";
-  const std::string                                  Parent_topology_meta  = "parent_topology";
-  const std::string                                  Time_scale_factor     = "timeScaleFactor";
-  const std::string                                  Time_meta             = "time";
-  const std::string                                  globals_entity_type   = "globals";
-  const std::string                                  globals_entity_name   = "";
-  constexpr const char *                             sideblock_names       = "sideblock_names";
-  constexpr size_t                                   sideblock_names_size = strlen(sideblock_names);
-  const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
-      {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
-      {"FaceBlock", {"connectivity_edge"}}};
-  const std::map<std::string, std::set<std::string>> Ignore_fields = {
-      {"NodeBlock",
-       {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
-      {"ElementBlock", {"implicit_ids"}},
-      {"FaceBlock", {"connectivity_raw"}},
-      {"EdgeBlock", {"connectivity_raw"}},
-      {"CommSet", {"ids"}},
-      {"SideSet", {"ids"}},
-      {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
-} // namespace
-
-DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
-                       Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
-                       const Ioss::PropertyManager &properties_x)
-    : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()),
-      adios_wrapper(communicator, filename, is_input(), rank)
-{
-  dbState = Ioss::STATE_UNKNOWN;
-  // Always 64 bits
-  dbIntSizeAPI = Ioss::USE_INT64_API;
+    dbState = Ioss::STATE_UNKNOWN;
+    // Always 64 bits
+    dbIntSizeAPI = Ioss::USE_INT64_API;
   }
 
   // Used to force `rank` initialization before creating `adios_wrapper`.
@@ -167,26 +169,58 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     return true;
   }
 
-  template <typename T>
-  void DatabaseIO::write_meta_data_t(const T &entity_blocks)
+  std::string DatabaseIO::get_property_variable_name(const std::string &property_name)
+  {
+    return property_meta + property_name;
+  }
+
+  template <typename T> void DatabaseIO::write_meta_data_t(const T &entity_blocks)
   {
     for (auto entity_block : entity_blocks) {
-      std::string entity_type = entity_block->type_string();
-      std::string entity_name = entity_block->name();
+      std::string entity_type  = entity_block->type_string();
+      std::string entity_name  = entity_block->name();
       std::string encoded_name = encode_field_name({entity_type, entity_name});
-      adios_wrapper.PutMetaVariable<std::string>(Topology_meta, entity_block->topology()->name(), encoded_name);
+      adios_wrapper.PutMetaVariable<std::string>(Topology_meta, entity_block->topology()->name(),
+                                                 encoded_name);
+      // Write field properties
+      std::vector<std::string> property_list = properties_to_save(entity_block);
+      for (auto property_name : property_list) {
+        Ioss::Property property = entity_block->get_property(property_name);
+
+        std::string variable_name = get_property_variable_name(property_name);
+        switch (property.get_type()) {
+        case Ioss::Property::BasicType::REAL:
+          adios_wrapper.PutMetaVariable<double>(variable_name, property.get_real(), encoded_name);
+          break;
+        case Ioss::Property::BasicType::INTEGER:
+          adios_wrapper.PutMetaVariable<int64_t>(variable_name, property.get_int(), encoded_name);
+          break;
+        case Ioss::Property::BasicType::STRING:
+          adios_wrapper.PutMetaVariable<std::string>(variable_name, property.get_string(),
+                                                     encoded_name);
+          break;
+        case Ioss::Property::BasicType::POINTER:
+        case Ioss::Property::BasicType::INVALID:
+        default:
+          // Do not save properties with an invalid type.
+          break;
+        }
+      }
     }
   }
 
   template <>
-  void DatabaseIO::write_meta_data_t<Ioss::SideBlockContainer>(const Ioss::SideBlockContainer &entity_blocks)
+  void DatabaseIO::write_meta_data_t<Ioss::SideBlockContainer>(
+      const Ioss::SideBlockContainer &entity_blocks)
   {
     for (auto entity_block : entity_blocks) {
-      std::string entity_type = entity_block->type_string();
-      std::string entity_name = entity_block->name();
+      std::string entity_type  = entity_block->type_string();
+      std::string entity_name  = entity_block->name();
       std::string encoded_name = encode_field_name({entity_type, entity_name});
-      adios_wrapper.PutMetaVariable<std::string>(Topology_meta, entity_block->topology()->name(), encoded_name);
-      adios_wrapper.PutMetaVariable<std::string>(Parent_topology_meta, entity_block->parent_element_topology()->name(), encoded_name);
+      adios_wrapper.PutMetaVariable<std::string>(Topology_meta, entity_block->topology()->name(),
+                                                 encoded_name);
+      adios_wrapper.PutMetaVariable<std::string>(
+          Parent_topology_meta, entity_block->parent_element_topology()->name(), encoded_name);
     }
   }
 
@@ -199,7 +233,7 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
       adios2::Variable<std::string> sblocks_var =
           adios_wrapper.InquireVariable<std::string>(encoded_name);
       if (sblocks_var) {
-        std::string                     stringified_sblock_names;
+        std::string stringified_sblock_names;
         for (auto sblock : sblocks) {
           stringified_sblock_names += Sideblock_separator + sblock->name();
         }
@@ -314,7 +348,7 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
     adios_wrapper.DefineMetaVariable<std::string>(Var_type_meta, encoded_name);
   }
-  
+
   template <typename T, typename = DatabaseIO::IsIossEntityBlock<T>>
   void DatabaseIO::define_entity_meta_variables(const std::string &encoded_name)
   {
@@ -333,7 +367,6 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     adios_wrapper.DefineMetaVariable<std::string>(Topology_meta, encoded_name);
     adios_wrapper.DefineMetaVariable<std::string>(Parent_topology_meta, encoded_name);
   }
-
 
   template <typename T>
   void DatabaseIO::define_model_internal(const Ioss::Field &field, const std::string &encoded_name,
@@ -358,13 +391,59 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
   std::string DatabaseIO::encode_field_name(std::vector<std::string> names) const
   {
     std::string encoded_name;
-    size_t count = 0;
-    for(std::vector<std::string>::iterator it = names.begin(); it != names.end()-1; it++, count++) {
-        encoded_name += *it + Name_separator;
+    size_t      count = 0;
+    for (std::vector<std::string>::iterator it = names.begin(); it != names.end() - 1;
+         it++, count++) {
+      encoded_name += *it + Name_separator;
     }
-    //sentinel value to avoid having to test if the string is empty or not.
+    // sentinel value to avoid having to test if the string is empty or not.
     names.push_back("");
     return encoded_name + names[count];
+  }
+
+  std::vector<std::string>
+  DatabaseIO::properties_to_save(const Ioss::GroupingEntity *const entity_block)
+  {
+    std::vector<std::string> property_list;
+    entity_block->property_describe(&property_list);
+    for (auto ignore_property : Ignore_properties) {
+      property_list.erase(std::remove(property_list.begin(), property_list.end(), ignore_property),
+                          property_list.end());
+    }
+    for (auto property_name : property_list) {
+      Ioss::Property property = entity_block->get_property(property_name);
+      if (property.is_invalid() && property.is_implicit()) {
+        property_list.erase(std::remove(property_list.begin(), property_list.end(), property_name),
+                            property_list.end());
+      }
+      return property_list;
+    }
+  }
+
+  void DatabaseIO::define_properties(const Ioss::GroupingEntity *const entity_block,
+                                     const std::string &               encoded_entity_name)
+  {
+    std::vector<std::string> property_list = properties_to_save(entity_block);
+    for (auto property_name : property_list) {
+      Ioss::Property property      = entity_block->get_property(property_name);
+      std::string    variable_name = get_property_variable_name(property_name);
+      switch (property.get_type()) {
+      case Ioss::Property::BasicType::REAL:
+        adios_wrapper.DefineMetaVariable<double>(variable_name, encoded_entity_name);
+        break;
+      case Ioss::Property::BasicType::INTEGER:
+        adios_wrapper.DefineMetaVariable<int64_t>(variable_name, encoded_entity_name);
+        break;
+      case Ioss::Property::BasicType::STRING:
+        adios_wrapper.DefineMetaVariable<std::string>(variable_name, encoded_entity_name);
+        break;
+      case Ioss::Property::BasicType::POINTER:
+      case Ioss::Property::BasicType::INVALID:
+      default:
+        // Do not save properties with an invalid type.
+        break;
+      }
+    }
   }
 
   template <typename T>
@@ -374,9 +453,11 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     for (auto entity_block : entity_blocks) {
       std::string entity_type = entity_block->type_string();
       std::string entity_name = entity_block->name();
-      if(!role) {
-        // These meta variables are only defined if state is STATE_DEFINE_MODEL:
-        define_entity_meta_variables<cv_removed_value_type>(encode_field_name({entity_type, entity_name}));
+      if (!role) {
+        // Meta variables and properties are only defined if state is STATE_DEFINE_MODEL:
+        std::string encoded_entity_name = encode_field_name({entity_type, entity_name});
+        define_entity_meta_variables<cv_removed_value_type>(encoded_entity_name);
+        define_properties(entity_block, encoded_entity_name);
       }
       Ioss::NameList field_names;
       entity_block->field_describe(&field_names);
@@ -433,7 +514,6 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     }
   }
 
-
   std::string DatabaseIO::encode_sideblock_name(std::string type_string, std::string name) const
   {
     return encode_field_name({type_string, name, sideblock_names});
@@ -442,7 +522,7 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
   bool DatabaseIO::is_sideblock_name(std::string name) const
   {
     size_t pos = name.find(sideblock_names);
-    if(pos == 0) {
+    if (pos == 0) {
       return true;
     }
     return false;
@@ -526,18 +606,15 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     }
   }
 
-
   // TODO: write actual code!
   // Returns byte size of integers stored on the database...
   int DatabaseIO::int_byte_size_db() const { return 4; }
-
 
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
     return put_field_internal_t(nb, field, data, data_size);
   }
-
 
   int DatabaseIO::find_field_in_mapset(
       const std::string &entity_type, const std::string &field_name,
@@ -556,23 +633,24 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
 
   template <typename T>
   void DatabaseIO::put_data(const Ioss::Field &field, void *data,
-                               const std::string &encoded_name) const
+                            const std::string &encoded_name) const
   {
-    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
+    adios2::Variable<T> entities = adios_wrapper.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
       adios_wrapper.Put<T>(entities, rdata,
                            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
     else {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Could not find variable '" << encoded_name << "'\n";
-        IOSS_ERROR(errmsg);
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Could not find variable '" << encoded_name << "'\n";
+      IOSS_ERROR(errmsg);
     }
   }
 
-  void DatabaseIO::put_meta_variables(const std::string &encoded_name,
-                                      const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const
+  void DatabaseIO::put_meta_variables(const std::string &encoded_name, const Ioss::Field &field,
+                                      const std::string &entity_type,
+                                      const std::string &field_name) const
   {
     adios_wrapper.PutMetaVariable<int>(Role_meta, field.get_role(), encoded_name);
     bool        transformed_field = use_transformed_storage(field, entity_type, field_name);
@@ -581,15 +659,15 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     adios_wrapper.PutMetaVariable<std::string>(Var_type_meta, var_type, encoded_name);
   }
 
-  template<typename T>
-  int64_t DatabaseIO::put_field_internal_t(T entity, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
+  template <typename T>
+  int64_t DatabaseIO::put_field_internal_t(T entity, const Ioss::Field &field, void *data,
+                                           size_t data_size) const
   {
     if (!data || !data_size) {
       return 0;
     }
-    std::string entity_type = entity->type_string();
-    const std::string &field_name = field.get_name();
+    std::string        entity_type = entity->type_string();
+    const std::string &field_name  = field.get_name();
     if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return 0;
     }
@@ -667,25 +745,27 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
   int64_t DatabaseIO::put_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    int64_t res = put_field_internal_t(ss, field, data, data_size);
-    if (res) {
-      std::string                   encoded_name = encode_sideblock_name(ss->type_string(), ss->name());
-      adios2::Variable<std::string> entities =
-          adios_wrapper.InquireVariable<std::string>(encoded_name);
-      std::vector<std::string> block_members;
-      for (auto &sb : ss->get_side_blocks()) {
-        block_members.push_back(sb->name());
-      }
-      if (entities && block_members.size()) {
-        std::string stringified_block_members;
-        for (std::string s : block_members) {
-          stringified_block_members += "/" + s;
-        }
-        adios_wrapper.Put<std::string>(
-            entities, stringified_block_members,
-            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-      }
-    }
+    return put_field_internal_t(ss, field, data, data_size);
+    // int64_t res = put_field_internal_t(ss, field, data, data_size);
+    // if (res) {
+    //   std::string                   encoded_name = encode_sideblock_name(ss->type_string(),
+    //   ss->name()); adios2::Variable<std::string> entities =
+    //       adios_wrapper.InquireVariable<std::string>(encoded_name);
+    //   std::vector<std::string> block_members;
+    //   for (auto &sb : ss->get_side_blocks()) {
+    //     block_members.push_back(sb->name());
+    //   }
+    //   if (entities && block_members.size()) {
+    //     std::string stringified_block_members;
+    //     for (std::string s : block_members) {
+    //       stringified_block_members += "/" + s;
+    //     }
+    //     adios_wrapper.Put<std::string>(
+    //         entities, stringified_block_members,
+    //         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+    //   }
+    // }
+    // return res;
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
@@ -695,39 +775,35 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     return put_field_internal_t(cs, field, data, data_size);
   }
 
-    template <typename T>
-    const std::string DatabaseIO::get_entity_type()
-    {
-      // Use "node" as default entity type to enable factory to create object.
-      std::unique_ptr<T> entity(NewEntity<T>(this, "", "node", 0));
-      return entity->type_string();
-    }
+  template <typename T> const std::string DatabaseIO::get_entity_type()
+  {
+    // Use "node" as default entity type to enable factory to create object.
+    std::unique_ptr<T> entity(NewEntity<T>(this, "", "node", 0));
+    return entity->type_string();
+  }
 
-    // NodeBlock has a different constructor...
-    template <>
-    const std::string DatabaseIO::get_entity_type<Ioss::NodeBlock>()
-    {
-      Ioss::NodeBlock nodeblock(this, "", 0, 1);
-      return nodeblock.type_string();
-    }
+  // NodeBlock has a different constructor...
+  template <> const std::string DatabaseIO::get_entity_type<Ioss::NodeBlock>()
+  {
+    Ioss::NodeBlock nodeblock(this, "", 0, 1);
+    return nodeblock.type_string();
+  }
 
-    // SideSet has a different constructor...
-    template <>
-    const std::string DatabaseIO::get_entity_type<Ioss::SideSet>()
-    {
-      Ioss::SideSet sideset(this, "");
-      return sideset.type_string();
-    }
+  // SideSet has a different constructor...
+  template <> const std::string DatabaseIO::get_entity_type<Ioss::SideSet>()
+  {
+    Ioss::SideSet sideset(this, "");
+    return sideset.type_string();
+  }
 
-    // SideBlock has a different constructor...
-    template <>
-    const std::string DatabaseIO::get_entity_type<Ioss::SideBlock>()
-    {
-      // default element arbitrarily set to "hex8": We need an element type
-      // to be able to construct this sideblock.
-      Ioss::SideBlock sideblock(this, "", "node", "hex8", 0);
-      return sideblock.type_string();
-    }
+  // SideBlock has a different constructor...
+  template <> const std::string DatabaseIO::get_entity_type<Ioss::SideBlock>()
+  {
+    // default element arbitrarily set to "hex8": We need an element type
+    // to be able to construct this sideblock.
+    Ioss::SideBlock sideblock(this, "", "node", "hex8", 0);
+    return sideblock.type_string();
+  }
 
   template <typename T>
   DatabaseIO::BlockInfoType DatabaseIO::get_expected_variable_infos_from_map(
@@ -742,8 +818,7 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
 
     if (entity_map.at(block_name).find(var_name) == entity_map.at(block_name).end()) {
       std::ostringstream errmsg;
-      errmsg << "ERROR: block name not found or does not contain `" << var_name
-             << "` field.\n";
+      errmsg << "ERROR: block name not found or does not contain `" << var_name << "` field.\n";
       IOSS_ERROR(errmsg);
     }
 
@@ -794,21 +869,20 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     return attribute.Data()[0];
   }
 
-  template<>
-  void DatabaseIO::get_entities<Ioss::NodeBlock>(const FieldsMapType &fields_map)
+  template <> void DatabaseIO::get_entities<Ioss::NodeBlock>(const FieldsMapType &fields_map, const FieldsMapType &properties_map)
   {
     const std::string block_type = get_entity_type<Ioss::NodeBlock>();
     // For exodusII, there is only a single node block which contains
     // all of the nodes.
     // The default id assigned is '1' and the name is 'nodeblock_1'
-    const EntityMapType &entity_map  = fields_map.at(block_type);
-    std::string          block_name  = "nodeblock_1";
+    const EntityMapType &entity_map = fields_map.at(block_type);
+    std::string          block_name = "nodeblock_1";
 
     // `mesh_model_coordinates` field is automatically created in NodeBlock constructor.
     std::string coord_var_name = "mesh_model_coordinates";
     // Get `node_count` and `spatialDimension`.
-    BlockInfoType model_coordinates_infos =
-        get_expected_variable_infos_from_map<double>(entity_map, block_type, block_name, coord_var_name);
+    BlockInfoType model_coordinates_infos = get_expected_variable_infos_from_map<double>(
+        entity_map, block_type, block_name, coord_var_name);
     spatialDimension = model_coordinates_infos.component_count;
     if (!spatialDimension) {
       std::ostringstream errmsg;
@@ -827,22 +901,68 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
       // Since some fields are created automatically, we need to avoid recreating them when loading
       // the file.
       if (!block->field_exists(variable.first)) {
-        BlockInfoType variable_infos = get_variable_infos_from_map(
-            entity_map, block_type, block_name, variable.first);
+        BlockInfoType variable_infos =
+            get_variable_infos_from_map(entity_map, block_type, block_name, variable.first);
         Ioss::Field field(variable.first, variable_infos.basic_type, variable_infos.variable_type,
                           variable_infos.role, variable_infos.node_boundaries_size);
         block->field_add(field);
         // TODO: Add offset?????
       }
     }
+    add_entity_properties(block, properties_map);
     bool added = get_region()->add(block);
     if (!added) {
       delete block;
     }
   }
 
+  template <typename T>
+  void DatabaseIO::add_entity_property(Ioss::GroupingEntity *ge, const std::string &encoded_name,
+                                       const std::string &property_name)
+  {
+    T variable;
+    adios_wrapper.Get<T>(encoded_name, variable,
+                         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+    Ioss::Property property(property_name, variable);
+    ge->property_add(property);
+  }
+
+  void DatabaseIO::add_entity_properties(Ioss::GroupingEntity *ge, const FieldsMapType &properties_map)
+  {
+    std::string          entity_type         = ge->type_string();
+    if (properties_map.find(entity_type) == properties_map.end()) {
+      return;
+    }
+    const EntityMapType &entity_property_map = properties_map.at(entity_type);
+    std::string entity_name = ge->name();
+    if (entity_property_map.find(entity_name) == entity_property_map.end()) {
+      return;
+    }
+    const GlobalMapType properties_info = entity_property_map.at(entity_name);
+    for (auto &property_info : properties_info) {
+      std::string property_name = property_info.first;
+      std::string encoded_name = property_info.second.first;
+      std::string type = property_info.second.second;
+      if (type == adios2::helper::GetType<std::string>()) {
+        add_entity_property<std::string>(ge, encoded_name, property_name);
+      }
+      else if (type == adios2::helper::GetType<double>()) {
+        add_entity_property<double>(ge, encoded_name, property_name);
+      }
+      else if (type == adios2::helper::GetType<int64_t>()) {
+        add_entity_property<int64_t>(ge, encoded_name, property_name);
+      }
+      else {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Property type `" << type << "` not supported.\n";
+        IOSS_ERROR(errmsg);
+      }
+    }
+  }
+
   template <>
-  void DatabaseIO::get_entities<Ioss::SideSet>(const FieldsMapType &fields_map)
+  void DatabaseIO::get_entities<Ioss::SideSet>(const FieldsMapType &fields_map,
+                                               const FieldsMapType &properties_map)
   {
     std::string entity_type = get_entity_type<Ioss::SideSet>();
     if (fields_map.find(entity_type) == fields_map.end()) {
@@ -853,13 +973,14 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     // for each SideSet, but we check this here outside of a loop as it only needs to be done once.
     bool no_sideblocks = (fields_map.find(sideblock_type) == fields_map.end());
 
-    const EntityMapType &sidesets_map = fields_map.at(entity_type);
+    const EntityMapType &sidesets_map   = fields_map.at(entity_type);
     const EntityMapType &sideblocks_map = fields_map.at(sideblock_type);
     for (auto &entity : sidesets_map) {
-      std::string entity_name = entity.first;
-      Ioss::SideSet *ss = new Ioss::SideSet(this, entity_name);
-      bool           added = get_region()->add(ss);
-      if (!added) {
+      std::string    entity_name = entity.first;
+      Ioss::SideSet *ss          = new Ioss::SideSet(this, entity_name);
+      bool           ss_added       = get_region()->add(ss);
+      //add_entity_properties(ss, properties_map);
+      if (!ss_added) {
         delete ss;
         return;
       }
@@ -869,8 +990,8 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
         // First, check that field is actually a field and not a list of sideblocks
         if (!is_sideblock_name(variable_pair.first)) {
           if (!ss->field_exists(variable_pair.first)) {
-            BlockInfoType infos = get_variable_infos_from_map(
-                sidesets_map, entity_type, entity_name, variable_pair.first);
+            BlockInfoType infos = get_variable_infos_from_map(sidesets_map, entity_type,
+                                                              entity_name, variable_pair.first);
             // TODO: Should we have a sanity check to verify that the field size is the same as
             // the entity size?
             Ioss::Field field(variable_pair.first, infos.basic_type, infos.variable_type,
@@ -882,7 +1003,7 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
           // The field in the bp file is actually a list of sideblocks
           // If no sideblock, don't worry about this section and move on to the next
           // sideset.
-          if(no_sideblocks) {
+          if (no_sideblocks) {
             continue;
           }
           std::string encoded_name =
@@ -896,16 +1017,16 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
                 bool first = true;
                 for (auto &sideblock_field_pair : sideblocks_map.at(block_name)) {
-                  std::string field_name = sideblock_field_pair.first;
+                  std::string   field_name  = sideblock_field_pair.first;
                   BlockInfoType block_infos = get_variable_infos_from_map(
-                        sideblocks_map, sideblock_type, block_name, field_name);
+                      sideblocks_map, sideblock_type, block_name, field_name);
                   // Create sideblock first
                   if (first) {
-                    Ioss::SideBlock *sideblock =
-                        new Ioss::SideBlock(this, block_name, block_infos.topology,
-                                            block_infos.parent_topology, block_infos.node_boundaries_size);
-                    bool added = ss->add(sideblock);
-                    if (!added) {
+                    Ioss::SideBlock *sideblock = new Ioss::SideBlock(
+                        this, block_name, block_infos.topology, block_infos.parent_topology,
+                        block_infos.node_boundaries_size);
+                    bool block_added = ss->add(sideblock);
+                    if (!block_added) {
                       delete sideblock;
                       std::ostringstream errmsg;
                       errmsg << "ERROR: Could not add sideblock `" << block_name << "` to sideset `"
@@ -920,11 +1041,13 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                     Ioss::Field field(field_name, block_infos.basic_type, block_infos.variable_type,
                                       block_infos.role, block_infos.node_boundaries_size);
                     sideblock->field_add(field);
+                    //                                  side_block->set_parent_element_block(block);
                   }
                 }
               }
               else {
-                //throw an error if sideblock not found? Check if sideblock name matches sideset name: it could
+                // throw an error if sideblock not found? Check if sideblock name matches sideset
+                // name: it could
                 // have been added automatically at read time if the list was empty (see STK).
               }
             }
@@ -940,24 +1063,22 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
   // that do not have to be specialized to call this function with a different number of
   // parameters.
   template <typename T>
-  auto
-  DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                        const std::string &/*entity_type*/, size_t entity_count)
-  -> IossHas3ParametersConstructor<T> *
+  auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
+                             const std::string & /*entity_type*/, size_t entity_count)
+      -> IossHas3ParametersConstructor<T> *
   {
     return new T(io_database, my_name, entity_count);
   }
 
   template <typename T>
   auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                        const std::string &entity_type, size_t entity_count)
-  -> IossHas4ParametersConstructor<T> *
+                             const std::string &entity_type, size_t entity_count)
+      -> IossHas4ParametersConstructor<T> *
   {
     return new T(io_database, my_name, entity_type, entity_count);
   }
 
-  template <typename T>
-  void DatabaseIO::get_entities(const FieldsMapType &fields_map)
+  template <typename T> void DatabaseIO::get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map)
   {
     std::string entity_type = get_entity_type<T>();
     if (fields_map.find(entity_type) == fields_map.end()) {
@@ -970,9 +1091,11 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
       // Get size and type info for the entity using the first element in the map.
       BlockInfoType infos_to_create_entity = get_variable_infos_from_map(
           entity_map, entity_type, entity_name, variable_pair.second.begin()->first);
-      T *  entity = NewEntity<T>(this, entity_name, infos_to_create_entity.topology,
+      T *entity = NewEntity<T>(this, entity_name, infos_to_create_entity.topology,
                                infos_to_create_entity.node_boundaries_size);
-      bool added  = get_region()->add(entity);
+      add_entity_properties(entity, properties_map);
+
+      bool added = get_region()->add(entity);
       if (!added) {
         delete entity;
       }
@@ -983,8 +1106,8 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
         // once inside the loop. The code could be modified to perform this action only once but
         // most likely the code will be more complex and will not save a lot of computation time.
         if (!entity->field_exists(field_pair.first)) {
-          BlockInfoType infos = get_variable_infos_from_map(
-              entity_map, entity_type, entity_name, field_pair.first);
+          BlockInfoType infos =
+              get_variable_infos_from_map(entity_map, entity_type, entity_name, field_pair.first);
           // TODO: Should we have a sanity check to verify that the field size is the same as
           // the entity size?
           Ioss::Field field(field_pair.first, infos.basic_type, infos.variable_type, infos.role,
@@ -995,13 +1118,14 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     }
   }
 
-  
-  std::string DatabaseIO::get_optional_string_variable(const std::string &field_name, const std::string & string_variable) const
+  std::string DatabaseIO::get_optional_string_variable(const std::string &field_name,
+                                                       const std::string &string_variable) const
   {
-    std::vector<std::string> tokens         = Ioss::tokenize(field_name, Name_separator);
-    std::string entity = encode_field_name({tokens[0], tokens[1]});
-    auto   v    = adios_wrapper.InquireVariable<std::string>(adios_wrapper.EncodeMetaVariable(string_variable, entity));
-    if(v) {
+    std::vector<std::string> tokens = Ioss::tokenize(field_name, Name_separator);
+    std::string              entity = encode_field_name({tokens[0], tokens[1]});
+    auto                     v      = adios_wrapper.InquireVariable<std::string>(
+        adios_wrapper.EncodeMetaVariable(string_variable, entity));
+    if (v) {
       return adios_wrapper.GetMetaVariable<std::string>(string_variable, entity);
     }
     else {
@@ -1085,222 +1209,308 @@ DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
     }
     infos.basic_type = template_to_basic_type<T>();
     return infos;
+  }
+
+  void DatabaseIO::get_globals(const GlobalMapType &globals_map)
+  {
+    // Check "time" attribute and global variable.
+    adios2::Attribute<double> timeScaleFactor_attr =
+        adios_wrapper.InquireAttribute<double>(Time_scale_factor);
+    if (timeScaleFactor_attr) {
+      timeScaleFactor = get_attribute<double>(Time_scale_factor);
+    }
+    else {
+      timeScaleFactor = 1.0;
     }
 
-    void DatabaseIO::get_globals(const GlobalMapType &globals_map)
-    {
-      // Check "time" attribute and global variable.
-      adios2::Attribute<double> timeScaleFactor_attr =
-          adios_wrapper.InquireAttribute<double>(Time_scale_factor);
-      if (timeScaleFactor_attr) {
-        timeScaleFactor = get_attribute<double>(Time_scale_factor);
+    Ioss::SerializeIO serializeIO__(this);
+    Ioss::Region *    this_region = get_region();
+    if (globals_map.find(Time_meta) != globals_map.end()) {
+      // Load time steps
+      // 1) Check that the time type is `double` as expected.
+      adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
+      std::vector<double>      tsteps(1);
+      if (time_var) {
+        for (size_t step = 0; step < time_var.Steps(); step++) {
+          // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
+          time_var.SetStepSelection(std::make_pair(step, 1)); // Check with streaming.
+          adios_wrapper.Get(time_var, tsteps.data());
+          this_region->add_state__(tsteps[0] * timeScaleFactor);
+        }
       }
       else {
-        timeScaleFactor = 1.0;
-      }
-
-      Ioss::SerializeIO serializeIO__(this);
-      Ioss::Region *    this_region = get_region();
-      if (globals_map.find(Time_meta) != globals_map.end()) {
-        // Load time steps
-        // 1) Check that the time type is `double` as expected.
-        adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
-        std::vector<double>      tsteps(1);
-        if (time_var) {
-          for (size_t step = 0; step < time_var.Steps(); step++) {
-            // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
-            time_var.SetStepSelection(std::make_pair(step, 1)); // Check with streaming.
-            adios_wrapper.Get(time_var, tsteps.data());
-            this_region->add_state__(tsteps[0] * timeScaleFactor);
-          }
-        }
-        else {
-          std::ostringstream errmsg;
-          errmsg << "ERROR: Timestep global detected in file but cannot read it.\n";
-          IOSS_ERROR(errmsg);
-        }
-      }
-    }
-
-
-    void DatabaseIO::read_meta_data__()
-    {
-      // Only get schema version attribute as it is the only one we expect.
-      get_attribute<unsigned int>(Schema_version_string);
-
-      // Get all variables
-      GlobalMapType   globals_map;
-      FieldsMapType fields_map;
-
-      const std::map<std::string, std::map<std::string, std::string>> variables =
-          adios_wrapper.AvailableVariables();
-      for (const auto &vpair : variables) {
-        const std::string &      name           = vpair.first;
-        auto                     name_type_pair = std::make_pair(name, vpair.second.at("Type"));
-        std::vector<std::string> tokens         = Ioss::tokenize(name, Name_separator);
-        switch (tokens.size()) {
-        case 1: globals_map[tokens[0]] = name_type_pair; break;
-        case 2:
-          // nothing to do.
-          break;
-        case 3: {
-          std::string is_meta            = "";
-          std::tie(std::ignore, is_meta) = adios_wrapper.DecodeMetaName(tokens[2]);
-          if (is_meta.empty()) {
-            fields_map[tokens[0]][tokens[1]][tokens[2]] = name_type_pair;
-          }
-          break;
-        }
-        default: {
-          std::ostringstream errmsg;
-          errmsg << "ERROR: Invalid encoded entity name.\n";
-          IOSS_ERROR(errmsg);
-        }
-        }
-      }
-
-      // read_region(reader_io);
-      // read_communication_metadata();
-
-      get_globals(globals_map);
-      get_entities<Ioss::NodeBlock>(fields_map);
-      get_entities<Ioss::EdgeBlock>(fields_map);
-      get_entities<Ioss::FaceBlock>(fields_map);
-      get_entities<Ioss::ElementBlock>(fields_map);
-
-      check_side_topology();
-
-      get_entities<Ioss::SideSet>(fields_map);
-      get_entities<Ioss::NodeSet>(fields_map);
-      get_entities<Ioss::EdgeSet>(fields_map);
-      get_entities<Ioss::FaceSet>(fields_map);
-      get_entities<Ioss::ElementSet>(fields_map);
-      get_entities<Ioss::CommSet>(fields_map);
-
-      // handle_groups();
-
-      // add_region_fields();
-
-      // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
-      //   get_map(EX_NODE_BLOCK);
-      //   get_map(EX_EDGE_BLOCK);
-      //   get_map(EX_FACE_BLOCK);
-      //   get_map(EX_ELEM_BLOCK);
-      // }
-    }
-
-    int64_t DatabaseIO::get_field_internal(const Ioss::Region *reg, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      throw "Not implemented yet";
-      return 0;
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(nb, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(eb, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(fb, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(eb, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(sb, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(ns, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(es, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(fs, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(es, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(ss, field, data, data_size);
-    }
-    int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      return get_field_internal_t(cs, field, data, data_size);
-    }
-
-    int64_t DatabaseIO::get_field_internal_t(const Ioss::GroupingEntity *entity, const Ioss::Field &field,
-                                           void *data, size_t data_size) const
-    {
-      const std::string entity_type = entity->type_string();
-      const std::string entity_name = entity->name();
-      const std::string &field_name = field.get_name();
-
-      std::string encoded_name = encode_field_name({entity_type, entity_name, field_name});
-
-      switch (field.get_type()) {
-      case Ioss::Field::BasicType::DOUBLE:
-        return get_data<double>(field, data, encoded_name, data_size);
-        break;
-      case Ioss::Field::BasicType::INT32:
-        return get_data<int32_t>(field, data, encoded_name, data_size);
-        break;
-      case Ioss::Field::BasicType::INT64:
-        return get_data<int64_t>(field, data, encoded_name, data_size);
-        break;
-      case Ioss::Field::BasicType::COMPLEX:
-        return get_data<Complex>(field, data, encoded_name, data_size);
-        break;
-      case Ioss::Field::BasicType::CHARACTER:
-        return get_data<char>(field, data, encoded_name, data_size);
-        break;
-      default:
         std::ostringstream errmsg;
-        errmsg << "INTERNAL ERROR: Invalid field type. "
-               << "Something is wrong in the Ioad::DatabaseIO::get_field_internal_t() function. "
-               << "Please report.\n";
+        errmsg << "ERROR: Timestep global detected in file but cannot read it.\n";
         IOSS_ERROR(errmsg);
       }
-      return 0;
     }
+  }
 
-    template <typename T>
-    int64_t DatabaseIO::get_data(const Ioss::Field &field, void *data,
-                                 const std::string &encoded_name, size_t data_size) const
-    {
-      adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
-      int                 num_to_get = field.verify(data_size);
+  void DatabaseIO::read_meta_data__()
+  {
+    // Only get schema version attribute as it is the only one we expect.
+    get_attribute<unsigned int>(Schema_version_string);
 
-      if (entities && data && data_size) {
-        T *rdata = static_cast<T *>(data);
-        // Set selection per rank. Support written by N processes, and loaded by M processes.
-        adios_wrapper.Get<T>(entities, rdata,
-                             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-        return num_to_get;
+    // Get all variables
+    GlobalMapType globals_map;
+    // Entity_type/Entity_name::Property -> name & Type
+    FieldsMapType properties_map;
+    // Entity_type/Entity_name/Field -> name & Type
+    FieldsMapType fields_map;
+
+    const std::map<std::string, std::map<std::string, std::string>> variables =
+        adios_wrapper.AvailableVariables();
+    for (const auto &vpair : variables) {
+      const std::string &      name           = vpair.first;
+      auto                     name_type_pair = std::make_pair(name, vpair.second.at("Type"));
+      std::vector<std::string> tokens         = Ioss::tokenize(name, Name_separator);
+      switch (tokens.size()) {
+      case 1: globals_map[tokens[0]] = name_type_pair; break;
+      case 2: {
+        // Only save properties.
+        std::string meta_var = "";
+        std::string property = "";
+        std::tie(meta_var, property) = adios_wrapper.DecodeMetaName(tokens[1]);
+        if (!property.compare(0, property_meta.size(), property_meta)) {
+          properties_map[tokens[0]][meta_var][property.substr(property_meta.size())] = name_type_pair;
+        }
+        break;
       }
-      return 0;
+      case 3: {
+        std::string is_meta            = "";
+        std::tie(std::ignore, is_meta) = adios_wrapper.DecodeMetaName(tokens[2]);
+        if (is_meta.empty()) {
+          fields_map[tokens[0]][tokens[1]][tokens[2]] = name_type_pair;
+        }
+        break;
+      }
+      default: {
+        std::ostringstream errmsg;
+        errmsg << "ERROR: Invalid encoded entity name.\n";
+        IOSS_ERROR(errmsg);
+      }
+      }
     }
+
+    // read_region(reader_io);
+    // read_communication_metadata();
+
+    get_globals(globals_map);
+    get_entities<Ioss::NodeBlock>(fields_map, properties_map);
+    get_entities<Ioss::EdgeBlock>(fields_map, properties_map);
+    get_entities<Ioss::FaceBlock>(fields_map, properties_map);
+    get_entities<Ioss::ElementBlock>(fields_map, properties_map);
+
+    check_side_topology();
+
+    get_entities<Ioss::SideSet>(fields_map, properties_map);
+    get_entities<Ioss::NodeSet>(fields_map, properties_map);
+    get_entities<Ioss::EdgeSet>(fields_map, properties_map);
+    get_entities<Ioss::FaceSet>(fields_map, properties_map);
+    get_entities<Ioss::ElementSet>(fields_map, properties_map);
+    get_entities<Ioss::CommSet>(fields_map, properties_map);
+
+    // handle_groups();
+
+    // add_region_fields();
+
+    // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
+    //   get_map(EX_NODE_BLOCK);
+    //   get_map(EX_EDGE_BLOCK);
+    //   get_map(EX_FACE_BLOCK);
+    //   get_map(EX_ELEM_BLOCK);
+    // }
+  }
+
+  int64_t DatabaseIO::get_field_internal(const Ioss::Region *reg, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    throw "Not implemented yet";
+    return 0;
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(nb, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(eb, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(fb, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(eb, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(sb, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(ns, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(es, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(fs, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(es, field, data, data_size);
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(ss, field, data, data_size);
+
+    // if (res) {
+    //   std::string                   encoded_name = encode_sideblock_name(ss->type_string(),
+    //   ss->name()); adios2::Variable<std::string> entities =
+    //       adios_wrapper.InquireVariable<std::string>(encoded_name);
+    //   std::vector<std::string> block_members;
+    //   for (auto &sb : ss->get_side_blocks()) {
+    //     block_members.push_back(sb->name());
+    //   }
+    //   if (entities && block_members.size()) {
+    //     std::string stringified_block_members;
+    //     for (std::string s : block_members) {
+    //       stringified_block_members += "/" + s;
+    //     }
+    //     adios_wrapper.Put<std::string>(
+    //         entities, stringified_block_members,
+    //         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+    //   }
+    // }
+    // return res;
+  }
+  int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
+                                         void *data, size_t data_size) const
+  {
+    return get_field_internal_t(cs, field, data, data_size);
+  }
+
+  int64_t DatabaseIO::get_field_internal_t(const Ioss::GroupingEntity *entity,
+                                           const Ioss::Field &field, void *data,
+                                           size_t data_size) const
+  {
+    const std::string  entity_type = entity->type_string();
+    const std::string  entity_name = entity->name();
+    const std::string &field_name  = field.get_name();
+
+    std::string encoded_name = encode_field_name({entity_type, entity_name, field_name});
+
+    switch (field.get_type()) {
+    case Ioss::Field::BasicType::DOUBLE:
+      return get_data<double>(field, data, encoded_name, data_size);
+      break;
+    case Ioss::Field::BasicType::INT32:
+      return get_data<int32_t>(field, data, encoded_name, data_size);
+      break;
+    case Ioss::Field::BasicType::INT64:
+      return get_data<int64_t>(field, data, encoded_name, data_size);
+      break;
+    case Ioss::Field::BasicType::COMPLEX:
+      return get_data<Complex>(field, data, encoded_name, data_size);
+      break;
+    case Ioss::Field::BasicType::CHARACTER:
+      return get_data<char>(field, data, encoded_name, data_size);
+      break;
+    default:
+      std::ostringstream errmsg;
+      errmsg << "INTERNAL ERROR: Invalid field type. "
+             << "Something is wrong in the Ioad::DatabaseIO::get_field_internal_t() function. "
+             << "Please report.\n";
+      IOSS_ERROR(errmsg);
+    }
+    return 0;
+  }
+
+  template <typename T>
+  int64_t DatabaseIO::get_data(const Ioss::Field &field, void *data,
+                               const std::string &encoded_name, size_t data_size) const
+  {
+    adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
+    int                 num_to_get = field.verify(data_size);
+
+    if (entities && data && data_size) {
+      T *rdata = static_cast<T *>(data);
+      // Set selection per rank. Support written by N processes, and loaded by M processes.
+      adios_wrapper.Get<T>(entities, rdata,
+                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      return num_to_get;
+    }
+    return 0;
+  }
+
+  void DatabaseIO::compute_block_membership__(Ioss::SideBlock *         efblock,
+                                              std::vector<std::string> &block_membership) const
+  {
+    const Ioss::ElementBlockContainer &element_blocks = get_region()->get_element_blocks();
+    assert(Ioss::Utils::check_block_order(element_blocks));
+
+    Ioss::Int64Vector block_ids(element_blocks.size());
+    if (block_ids.size() == 1) {
+      block_ids[0] = 1;
+    }
+    else {
+      Ioss::Int64Vector element_side;
+      if (int_byte_size_api() == 4) {
+        Ioss::IntVector es32;
+        efblock->get_field_data("element_side", es32);
+        element_side.resize(es32.size());
+        std::copy(es32.begin(), es32.end(), element_side.begin());
+      }
+      else {
+        efblock->get_field_data("element_side", element_side);
+      }
+
+      size_t              number_sides = element_side.size() / 2;
+      Ioss::ElementBlock *block        = nullptr;
+      for (size_t iel = 0; iel < number_sides; iel++) {
+        int64_t elem_id = element_side[2 * iel]; // Vector contains both element and side.
+        // elem_id         = elemMap.global_to_local(elem_id);
+        if (block == nullptr || !block->contains(elem_id)) {
+          block = get_region()->get_element_block(elem_id);
+          assert(block != nullptr);
+          size_t block_order = block->get_property("original_block_order").get_int();
+          assert(block_order < block_ids.size());
+          block_ids[block_order] = 1;
+        }
+      }
+    }
+
+    // Synchronize among all processors....
+    // if (isParallel) {
+    //   util().global_array_minmax(block_ids, Ioss::ParallelUtils::DO_MAX);
+    // }
+
+    for (const auto block : element_blocks) {
+      size_t block_order = block->get_property("original_block_order").get_int();
+      // TODO: The following line is only for debugging purposes. Field properties need to be
+      // saved in output file.
+      //size_t block_order = 0;
+      assert(block_order < block_ids.size());
+      if (block_ids[block_order] == 1) {
+        if (!Ioss::Utils::block_is_omitted(block)) {
+          block_membership.push_back(block->name());
+        }
+      }
+    }
+  }
 
 } // namespace Ioad

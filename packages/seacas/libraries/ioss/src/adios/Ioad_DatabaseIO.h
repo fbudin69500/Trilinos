@@ -166,7 +166,7 @@ namespace Ioad {
 
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
-    
+
     struct BlockInfoType
     {
       std::vector<size_t>    steps;
@@ -182,74 +182,89 @@ namespace Ioad {
 
     template <typename T> BlockInfoType get_variable_infos(const std::string &var_name) const;
     using GlobalMapType = std::map<std::string, std::pair<std::string, std::string>>;
-    using EntityMapType =
-        std::map<std::string, GlobalMapType>;
+    using EntityMapType = std::map<std::string, GlobalMapType>;
     using FieldsMapType = std::map<std::string, EntityMapType>;
 
     template <typename T>
-    BlockInfoType
-                  get_expected_variable_infos_from_map(const EntityMapType &fields_map, const std::string &entity_type,
-                                              const std::string &entity_name, const std::string &var_name) const;
-    BlockInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
+    BlockInfoType get_expected_variable_infos_from_map(const EntityMapType &fields_map,
                                                        const std::string &  entity_type,
                                                        const std::string &  entity_name,
                                                        const std::string &  var_name) const;
+    BlockInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
+                                              const std::string &  entity_type,
+                                              const std::string &  entity_name,
+                                              const std::string &  var_name) const;
 
     std::string encode_field_name(std::vector<std::string> names) const;
     std::string encode_sideblock_name(std::string type_string, std::string name) const;
-    bool is_sideblock_name(std::string name) const;
+    bool        is_sideblock_name(std::string name) const;
 
+    template <typename T>
+    using IsIossEntityBlock =
+        typename std::enable_if<std::is_base_of<Ioss::EntityBlock, T>::value>::type;
+    template <typename T>
+    using IsNotIossEntityBlock =
+        typename std::enable_if<!std::is_base_of<Ioss::EntityBlock, T>::value>::type;
+    template <typename T>
+    using CompareEntityBlock =
+        typename std::conditional<std::is_base_of<Ioss::EntityBlock, T>::value, Ioss::EntityBlock,
+                                  Ioss::GroupingEntity>::type;
 
-    template<typename T>
-    using IsIossEntityBlock = typename std::enable_if<std::is_base_of<Ioss::EntityBlock, T>::value>::type;
-    template<typename T>
-    using IsNotIossEntityBlock = typename std::enable_if<!std::is_base_of<Ioss::EntityBlock, T>::value>::type;
-    template<typename T>
-    using CompareEntityBlock = typename std::conditional<std::is_base_of<Ioss::EntityBlock, T>::value, Ioss::EntityBlock, Ioss::GroupingEntity>::type;
+    template <typename T, typename = IsIossEntityBlock<T>>
+    void define_entity_meta_variables(const std::string &encoded_name);
 
-  template <typename T, typename = IsIossEntityBlock<T>>
-  void define_entity_meta_variables(const std::string &encoded_name);
-
-  template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
-  void define_entity_meta_variables(const std::string &encoded_name);
-
+    template <typename T, typename = IsNotIossEntityBlock<T>, typename = void>
+    void define_entity_meta_variables(const std::string &encoded_name);
 
     void define_field_meta_variables(const std::string &);
-    
-    void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field, const std::string &entity_type, const std::string &field_name) const;
+
+    void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field,
+                            const std::string &entity_type, const std::string &field_name) const;
 
     void write_meta_data();
 
     template <typename T>
-    void write_meta_data_t(const T &entity_blocks);
+    void add_entity_property(Ioss::GroupingEntity *ge, const std::string &encoded_name,
+                             const std::string &var_name);
+    void add_entity_properties(Ioss::GroupingEntity *ge, const FieldsMapType &properties_map);
+
+    template <typename T> void write_meta_data_t(const T &entity_blocks);
+
+    template <typename T> const std::string get_entity_type();
+    template <typename T> void              get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map);
+    std::string get_optional_string_variable(const std::string &field_name,
+                                             const std::string &string_variable) const;
 
     template <typename T>
-    const std::string get_entity_type();
+    using DerivedFromIossGroupingEntity =
+        typename std::enable_if<std::is_base_of<Ioss::GroupingEntity, T>::value, bool>::type;
+
     template <typename T>
-    void get_entities(const FieldsMapType &fields_map);
-    std::string get_optional_string_variable(const std::string &field_name, const std::string & string_variable) const;
+    using IossHas3ParametersConstructor =
+        decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO *){}, std::string{}, int64_t{}));
 
-template<typename T>
-using DerivedFromIossGroupingEntity = typename std::enable_if<std::is_base_of<Ioss::GroupingEntity, T>::value, bool>::type;
+    template <typename T>
+    using IossHas4ParametersConstructor =
+        decltype(DerivedFromIossGroupingEntity<T>{},
+                 T((DatabaseIO *){}, std::string{}, std::string{}, int64_t{}));
 
-template <typename T>
-using IossHas3ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO*){}, std::string{},  int64_t{}));
+    template <typename T>
+    auto NewEntity(DatabaseIO *io_database, const std::string &my_name,
+                   const std::string & /*entity_type*/, size_t entity_count)
+        -> IossHas3ParametersConstructor<T> *;
 
-template <typename T>
-using IossHas4ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO*){}, std::string{}, std::string{}, int64_t{}));
+    template <typename T>
+    auto NewEntity(DatabaseIO *io_database, const std::string &my_name,
+                   const std::string &entity_type, size_t entity_count)
+        -> IossHas4ParametersConstructor<T> *;
 
-  template <typename T>
-  auto
-  NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                        const std::string &/*entity_type*/, size_t entity_count)
-  -> IossHas3ParametersConstructor<T> *;
-
-  template <typename T>
-  auto NewEntity(DatabaseIO *io_database, const std::string &my_name, const std::string &entity_type, size_t entity_count)
-  -> IossHas4ParametersConstructor<T> *;
-
-    void get_globals(const GlobalMapType &globals_map);
-
+    void        get_globals(const GlobalMapType &globals_map);
+    void        compute_block_membership__(Ioss::SideBlock *         efblock,
+                                           std::vector<std::string> &block_membership) const;
+    void        define_properties(const Ioss::GroupingEntity * entity_block,
+                                  const std::string &               encoded_entity_name);
+    std::string get_property_variable_name(const std::string &property_name);
+    std::vector<std::string> properties_to_save(const Ioss::GroupingEntity *const entity_block);
 
     int  RankInit();
     bool begin_state__(Ioss::Region * /* region */, int state, double time);
@@ -259,9 +274,9 @@ using IossHas4ParametersConstructor = decltype(DerivedFromIossGroupingEntity<T>{
                              const std::map<std::string, std::set<std::string>> &mapset) const;
     unsigned long rank; // rank needs to be declared first to be initialized before adios_wrapper.
     mutable AdiosWrapper adios_wrapper; // adios_wrapper needs to be declared before bpio
-                                     // and bp_engine to be initialized first.
-    int                                                spatialDimension{0};
-    unsigned long                                      number_proc;
+                                        // and bp_engine to be initialized first.
+    int           spatialDimension{0};
+    unsigned long number_proc;
   };
 } // namespace Ioad
 #endif
