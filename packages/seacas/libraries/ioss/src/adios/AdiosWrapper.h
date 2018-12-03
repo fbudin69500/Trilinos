@@ -37,7 +37,7 @@ namespace Ioad {
 
   private:
     adios2::IO     IOInit();
-    adios2::Engine EngineInit(MPI_Comm communicator, const std::string &filename, bool is_input);
+    adios2::Engine EngineInit(const std::string &filename, bool is_input);
 
 
     const std::string m_MetaSeparator{"::"};

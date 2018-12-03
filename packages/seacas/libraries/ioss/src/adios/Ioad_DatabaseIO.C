@@ -1449,7 +1449,7 @@ namespace Ioad {
 
     if (entities && data && data_size) {
       T *rdata = static_cast<T *>(data);
-      // Set selection per rank. Support written by N processes, and loaded by M processes.
+      // TODO: Set selection per rank. Support written by N processes, and loaded by M processes.
       adios_wrapper.Get<T>(entities, rdata,
                            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       return num_to_get;
@@ -1501,9 +1501,6 @@ namespace Ioad {
 
     for (const auto block : element_blocks) {
       size_t block_order = block->get_property("original_block_order").get_int();
-      // TODO: The following line is only for debugging purposes. Field properties need to be
-      // saved in output file.
-      //size_t block_order = 0;
       assert(block_order < block_ids.size());
       if (block_ids[block_order] == 1) {
         if (!Ioss::Utils::block_is_omitted(block)) {

@@ -6,7 +6,7 @@ namespace Ioad {
                              unsigned long rank)
       : adios2::ADIOS(comm),
         m_Communicator(comm), adios2::IO(IOInit()), adios2::Engine(
-                                                        EngineInit(comm, filename, is_input)),
+                                                        EngineInit(filename, is_input)),
         m_OpenStep(false), m_Rank(rank)
   {
   }
@@ -19,14 +19,14 @@ namespace Ioad {
     return bpio;
   }
 
-  adios2::Engine AdiosWrapper::EngineInit(MPI_Comm communicator, const std::string &filename,
+  adios2::Engine AdiosWrapper::EngineInit(const std::string &filename,
                                           bool is_input)
   {
     adios2::Mode mode = adios2::Mode::Read;
     if (!is_input) {
       mode = adios2::Mode::Write;
     }
-    return this->IO::Open(filename, mode, communicator);// TODO: remove communicator
+    return this->IO::Open(filename, mode);
   }
 
   AdiosWrapper::~AdiosWrapper()
