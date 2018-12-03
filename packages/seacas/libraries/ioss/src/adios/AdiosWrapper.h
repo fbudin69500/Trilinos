@@ -3,6 +3,7 @@
 
 #include <adios2.h>
 #include <string>
+#include <Ioss_PropertyManager.h>
 
 namespace Ioad {
 
@@ -10,7 +11,7 @@ namespace Ioad {
   {
   public:
     AdiosWrapper(MPI_Comm communicator, const std::string &filename, bool is_input,
-                 unsigned long rank);
+                 unsigned long rank, const Ioss::PropertyManager &properties);
     AdiosWrapper(AdiosWrapper &&wrapper);
     ~AdiosWrapper();
     void BeginStep();
@@ -36,7 +37,7 @@ namespace Ioad {
     using adios2::IO::InquireVariable;
 
   private:
-    adios2::IO     IOInit();
+    adios2::IO     IOInit(const Ioss::PropertyManager &properties);
     adios2::Engine EngineInit(const std::string &filename, bool is_input);
 
 

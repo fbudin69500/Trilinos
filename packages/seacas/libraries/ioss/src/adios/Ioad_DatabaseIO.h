@@ -63,7 +63,7 @@ namespace Ioad {
   {
   public:
     DatabaseIO(Ioss::Region *region, const std::string &filename, Ioss::DatabaseUsage db_usage,
-               MPI_Comm communicator, const Ioss::PropertyManager &properties_x);
+               MPI_Comm communicator, const Ioss::PropertyManager &props);
     ~DatabaseIO();
     DatabaseIO(const DatabaseIO &from) = delete;
     DatabaseIO &operator=(const DatabaseIO &from) = delete;

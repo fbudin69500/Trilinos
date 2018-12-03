@@ -3,19 +3,27 @@
 namespace Ioad {
 
   AdiosWrapper::AdiosWrapper(MPI_Comm comm, const std::string &filename, bool is_input,
-                             unsigned long rank)
+                             unsigned long rank, const Ioss::PropertyManager &properties)
       : adios2::ADIOS(comm),
-        m_Communicator(comm), adios2::IO(IOInit()), adios2::Engine(
+        m_Communicator(comm), adios2::IO(IOInit(properties)), adios2::Engine(
                                                         EngineInit(filename, is_input)),
         m_OpenStep(false), m_Rank(rank)
   {
   }
 
-  adios2::IO AdiosWrapper::IOInit()
+  adios2::IO AdiosWrapper::IOInit(const Ioss::PropertyManager &properties)
   {
     adios2::IO bpio = this->ADIOS::DeclareIO("io");
-    bpio.SetEngine("BPFile");
-    bpio.AddTransport("File", {{"Library", "POSIX"}});
+    std::string engine = "BPFile";
+    std::string transport = "File";
+    adios2::Params transport_parameters = {{"Library", "POSIX"}};
+
+    if (properties.exists("engine")) {
+      engine = properties.get("engine").get_string();
+    }
+    bpio.SetEngine(engine);
+    
+    bpio.AddTransport(transport, transport_parameters);
     return bpio;
   }
 

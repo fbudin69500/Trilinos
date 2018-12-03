@@ -141,9 +141,9 @@ namespace Ioad {
 
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
-                         const Ioss::PropertyManager &properties_x)
-      : Ioss::DatabaseIO(region, filename, db_usage, communicator, properties_x), rank(RankInit()),
-        adios_wrapper(communicator, filename, is_input(), rank)
+                         const Ioss::PropertyManager &props)
+      : Ioss::DatabaseIO(region, filename, db_usage, communicator, props), rank(RankInit()),
+        adios_wrapper(communicator, filename, is_input(), rank, props)
   {
     dbState = Ioss::STATE_UNKNOWN;
     // Always 64 bits
