@@ -1877,6 +1877,7 @@ void DatabaseIO::get_elemsets()
 
 void DatabaseIO::get_commsets()
 {
+    std::cout<<"get_commsets()"<<std::endl;
   // Attributes of a commset are:
   // -- id (property)
   // -- name (property)
@@ -1942,11 +1943,14 @@ void DatabaseIO::get_commsets()
     commset->property_add(Ioss::Property("id", 1));
     commset->property_add(Ioss::Property("guid", util().generate_guid(1)));
     get_region()->add(commset);
-
+std::cout<<"my_node_count:"<<my_node_count<<std::endl;
     commset = new Ioss::CommSet(this, "commset_side", "side", elem_count);
     commset->property_add(Ioss::Property("id", 1));
     commset->property_add(Ioss::Property("guid", util().generate_guid(1)));
     get_region()->add(commset);
+    std::cout<<"elem_count:"<<elem_count<<std::endl;
+    size_t num_sharings = commset->get_field("entity_processor").raw_count();
+    std::cout<<"num_sharing:"<<num_sharings<<std::endl;
   }
 }
 
@@ -1960,6 +1964,7 @@ int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Fi
                                        void *data, size_t data_size) const
 {
   {
+    std::cout<<"get field internal nodeblock"<<std::endl;
     Ioss::SerializeIO serializeIO__(this);
 
     size_t num_to_get = field.verify(data_size);
@@ -2081,12 +2086,14 @@ int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Fi
 
         else if (field.get_name() == "owning_processor") {
           // owning_processor field is always 32-bit.
+          std::cout<<"from get internal block"<<std::endl;
           if (isParallel) {
             Ioss::CommSet *css   = get_region()->get_commset("commset_node");
             int *          idata = static_cast<int *>(data);
             for (int64_t i = 0; i < nodeCount; i++) {
               idata[i] = myProcessor;
             }
+            std::cout<<"owning processor"<<std::endl;
 
             if ((ex_int64_status(get_file_pointer()) & EX_BULK_INT64_API) != 0) {
               Ioss::Field          ep_field = css->get_field("entity_processor_raw");
@@ -2145,6 +2152,8 @@ int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Fi
         num_to_get = read_attribute_field(EX_NODE_BLOCK, field, nb, data);
       }
     }
+              std::cout<<"from get internal block end"<<std::endl;
+
     return num_to_get;
   }
 }
@@ -2679,7 +2688,7 @@ int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Fiel
 {
   {
     Ioss::SerializeIO serializeIO__(this);
-
+      std::cout<<"commset get internal"<<std::endl;
     size_t num_to_get = field.verify(data_size);
 
     if (num_to_get > 0) {
@@ -5120,7 +5129,7 @@ void DatabaseIO::gather_communication_metadata(Ioex::CommunicationMetaData *meta
 {
   // It's possible that we are a serial program outputting information
   // for later use by a parallel program.
-
+  std::cout<<"gather_communication_metadata"<<std::endl;
   meta->processorCount = 0;
   meta->processorId    = 0;
   meta->outputNemesis  = false;

@@ -108,8 +108,7 @@ namespace Ioad {
     int64_t get_field_internal_t(const Ioss::GroupingEntity *entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     template <typename T>
-    int64_t get_data(const Ioss::Field &field, void *data, const std::string &encoded_name,
-                     size_t data_size) const;
+    void get_data(void *data, const std::string &encoded_name) const;
 
     int64_t put_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
@@ -154,7 +153,7 @@ namespace Ioad {
     int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
 
     template <typename T>
-    void put_data(const Ioss::Field &field, void *data, const std::string &encoded_name) const;
+    void put_data(void *data, const std::string &encoded_name) const;
     template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
     void put_var_type(const Ioss::Field &field, const std::string &encoded_name,
                       bool transformed_field) const;
@@ -167,10 +166,10 @@ namespace Ioad {
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
 
-    struct BlockInfoType
+    struct FieldInfoType
     {
       std::vector<size_t>    steps;
-      size_t                 node_boundaries_start;
+      //size_t                 node_boundaries_start;
       size_t                 node_boundaries_size;
       size_t                 component_count = {0};
       Ioss::Field::RoleType  role;
@@ -180,17 +179,26 @@ namespace Ioad {
       std::string            parent_topology;
     };
 
-    template <typename T> BlockInfoType get_variable_infos(const std::string &var_name) const;
+    struct ProcessorInfo
+    {
+      unsigned long processor_id = -1;
+      unsigned long processor_number = -1;
+    };
+  
+    template <typename T> FieldInfoType get_variable_infos(const std::string &var_name) const;
     using GlobalMapType = std::map<std::string, std::pair<std::string, std::string>>;
     using EntityMapType = std::map<std::string, GlobalMapType>;
     using FieldsMapType = std::map<std::string, EntityMapType>;
 
+    template<typename T>
+    std::string get_property_value(const FieldsMapType & properties_map, const std::string &entity_type, const std::string &entity_name, const std::string &property_name) const;
+
     template <typename T>
-    BlockInfoType get_expected_variable_infos_from_map(const EntityMapType &fields_map,
+    FieldInfoType get_expected_variable_infos_from_map(const EntityMapType &fields_map,
                                                        const std::string &  entity_type,
                                                        const std::string &  entity_name,
                                                        const std::string &  var_name) const;
-    BlockInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
+    FieldInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
                                               const std::string &  entity_type,
                                               const std::string &  entity_name,
                                               const std::string &  var_name) const;
@@ -220,15 +228,16 @@ namespace Ioad {
 
     void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field,
                             const std::string &entity_type, const std::string &field_name) const;
-
     void write_meta_data();
 
     template <typename T>
     void add_entity_property(Ioss::GroupingEntity *ge, const std::string &encoded_name,
                              const std::string &var_name);
-    void add_entity_properties(Ioss::GroupingEntity *ge, const FieldsMapType &properties_map);
+    void add_entity_properties(Ioss::GroupingEntity *ge, const FieldsMapType &properties_map, std::string name = "");
 
-    template <typename T> void write_meta_data_t(const T &entity_blocks);
+    void write_properties(const Ioss::GroupingEntity * const entity, const std::string & encoded_name);
+
+    template <typename T> void write_meta_data_container(const T &entity_blocks);
 
     template <typename T> const std::string get_entity_type();
     template <typename T> void              get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map);
@@ -258,7 +267,7 @@ namespace Ioad {
                    const std::string &entity_type, size_t entity_count)
         -> IossHas4ParametersConstructor<T> *;
 
-    void        get_globals(const GlobalMapType &globals_map);
+    void        get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map);
     void        compute_block_membership__(Ioss::SideBlock *         efblock,
                                            std::vector<std::string> &block_membership) const;
     void        define_properties(const Ioss::GroupingEntity * entity_block,
@@ -277,6 +286,8 @@ namespace Ioad {
                                         // and bp_engine to be initialized first.
     int           spatialDimension{0};
     unsigned long number_proc;
+
+    ProcessorInfo proc_info;
   };
 } // namespace Ioad
 #endif

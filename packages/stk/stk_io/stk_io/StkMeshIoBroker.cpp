@@ -761,7 +761,6 @@ void StkMeshIoBroker::validate_output_file_index(size_t output_file_index) const
     ThrowErrorMsgIf(!is_index_valid(m_outputFiles, output_file_index),
                     "StkMeshIoBroker::validate_output_file_index: invalid output file index of "
                     << output_file_index << ".");
-
     ThrowErrorMsgIf (Teuchos::is_null(m_outputFiles[output_file_index]->get_output_io_region()),
                      "StkMeshIoBroker::validate_output_file_index: There is no Output mesh region associated with this output file index: " << output_file_index << ".");
 }

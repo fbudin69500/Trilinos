@@ -71,7 +71,7 @@ namespace {
     size_t input_index = mesh_data.add_mesh_database(file, type, stk::io::READ_MESH);
     mesh_data.set_active_mesh(input_index);
     mesh_data.create_input_mesh();
-
+std::cout<<"1"<<std::endl;
     // This is done just to define some fields in stk
     // that can be used later for reading restart data.
     stk::io::MeshField::TimeMatchOption tmo = stk::io::MeshField::CLOSEST;
@@ -79,8 +79,10 @@ namespace {
       tmo = stk::io::MeshField::LINEAR_INTERPOLATION;
     }
     mesh_data.add_all_mesh_fields_as_input_fields(tmo);
+std::cout<<"2"<<std::endl;
 
     mesh_data.populate_bulk_data();
+std::cout<<"3"<<std::endl;
 
     // ========================================================================
     // Create output mesh...  ("generated_mesh.out") ("exodus_mesh.out")
@@ -90,11 +92,13 @@ namespace {
     // No data is written at this time other than verifying that the
     // file can be created on the disk.
     size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS, "adios");
+std::cout<<"4"<<std::endl;
 
     // Create restart output ...  ("generated_mesh.restart") ("exodus_mesh.restart")
     std::string restart_filename = working_directory + type + "_mesh.restart";
 
     size_t restart_index = mesh_data.create_output_mesh(restart_filename, stk::io::WRITE_RESTART);
+std::cout<<"5"<<std::endl;
 
     // Iterate all fields and set them as restart fields...
     const stk::mesh::FieldVector &fields = mesh_data.meta_data().get_fields();
@@ -105,12 +109,14 @@ namespace {
 	mesh_data.add_field(results_index, *fields[i]); // results output
       }
     }
+std::cout<<"6"<<std::endl;
 
     // Determine the names of the global fields on the input
     // mesh. These will be used below to define the same fields on the
     // restart and results output databases.
     std::vector<std::string> global_fields;
     mesh_data.get_global_variable_names(global_fields);
+std::cout<<"7"<<std::endl;
 
     // Create heartbeat file of the specified format...
     size_t heart = 0;
@@ -120,7 +126,8 @@ namespace {
     }
     
     stk::util::ParameterList parameters;
-    
+  std::cout<<"8"<<std::endl;
+  
     // For each global field name on the input database, determine the type of the field
     // and define that same global field on the results, restart, history, and heartbeat outputs.
     if (!global_fields.empty()) {
@@ -128,7 +135,8 @@ namespace {
     }
 
     auto io_region = mesh_data.get_input_io_region();
-      
+      std::cout<<"9"<<std::endl;
+
     for (size_t i=0; i < global_fields.size(); i++) {
       const Ioss::Field &input_field = io_region->get_fieldref(global_fields[i]);
       std::cout << "\t" << input_field.get_name() << " of type " << input_field.raw_storage()->name() << "\n";
@@ -141,6 +149,7 @@ namespace {
 	std::vector<double> vals(input_field.raw_storage()->component_count());
 	parameters.set_param(input_field.get_name(), vals);
       }
+std::cout<<"11"<<std::endl;
 
       // Define the global fields that will be written on each timestep.
       mesh_data.add_global(restart_index, input_field.get_name(),
@@ -152,6 +161,7 @@ namespace {
 	mesh_data.add_heartbeat_global(heart, input_field.get_name(), &param.value, param.type);
       }
     }
+std::cout<<"12"<<std::endl;
 
     // ========================================================================
     // Begin the transient loop...  All timesteps on the input database are transferred
@@ -180,10 +190,12 @@ namespace {
 	  // reading restart data at each step on the input restart file/mesh and then
 	  // outputting that data to the restart and results output.
 	  time = tbeg + delta * static_cast<double>(interval);
+std::cout<<"14"<<std::endl;
 
 	  mesh_data.read_defined_input_fields(time);
 	  mesh_data.begin_output_step(restart_index, time);
 	  mesh_data.begin_output_step(results_index, time);
+std::cout<<"15"<<std::endl;
 
 	  mesh_data.write_defined_output_fields(restart_index);
 	  mesh_data.write_defined_output_fields(results_index);
@@ -197,6 +209,7 @@ namespace {
 	    stk::util::Parameter &parameter = parameters.get_param(parameterName);
 	    mesh_data.get_global(parameterName, parameter.value, parameter.type);
 	  }
+std::cout<<"16"<<std::endl;
 
 	  for (i=parameters.begin(); i != iend; ++i) {
 	    const std::string parameterName = (*i).first;
@@ -212,6 +225,7 @@ namespace {
 	if (hb_type != stk::io::NONE && !global_fields.empty()) {
 	  mesh_data.process_heartbeat_output(heart, step, time);
 	}
+std::cout<<"20"<<std::endl;
 
 	// Flush the data.  This is not necessary in a normal
 	// application, Just being done here to verify that the
@@ -275,6 +289,8 @@ namespace bopt = boost::program_options;
 
 int main(int argc, char** argv)
 {
+  int a;
+  //std::cin>>a;
   std::string working_directory = "";
   std::string decomp_method = "";
   std::string mesh = "";

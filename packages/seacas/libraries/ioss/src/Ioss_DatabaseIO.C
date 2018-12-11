@@ -691,6 +691,7 @@ namespace Ioss {
   // common
   void DatabaseIO::compute_block_adjacencies() const
   {
+    std::cout<<"compute_block_adjacencies"<<std::endl;
     // Add a field to each element block specifying which other element
     // blocks the block is adjacent to (defined as sharing nodes).
     // This is only calculated on request...

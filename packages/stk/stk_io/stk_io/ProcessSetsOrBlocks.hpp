@@ -85,13 +85,25 @@ void process_node_sharing(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::
   if (bulk.parallel_size() > 1)
 #else
   myComm = comm;
+  std::cout<<"d1"<<std::endl;
   numProc = stk::parallel_machine_size(comm);
+  std::cout<<"d2-"<<numProc<<std::endl;
   if (stk::parallel_machine_size(comm) > 1)
 #endif
   {
+    std::cout<<"region in stk:"<<&region<<std::endl;
     Ioss::CommSet* io_cs = region.get_commset("commset_node");
+    std::cout<<"d25"<<std::endl;
+          Ioss::NameList field_names;
+        std::cout<<"io_cs:"<<io_cs<<std::endl;
+        io_cs->field_describe(&field_names);
+        std::cout<<"after field_describe"<<std::endl;
+        std::cout<<"field name number:" << field_names.size();
+      for (auto field_name : field_names) {
+          std::cout<<"field name:"<<field_name<<std::endl;
+      }
     size_t num_sharings = io_cs->get_field("entity_processor").raw_count();
-
+std::cout<<"d3:"<<num_sharings<<std::endl;
     // Check for corrupt incomplete nemesis information.  Some old
     // files are being used which do not have the correct nemesis
     // sharing data. They can be identified by an incorrect global
@@ -182,12 +194,15 @@ void process_nodeblocks(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::Pa
   assert(node_blocks.size() == 1);
 
   Ioss::NodeBlock *nb = node_blocks[0];
+std::cout<<"c1"<<std::endl;
 
   std::vector<INT> ids;
   nb->get_field_data("ids", ids);
+std::cout<<"c2"<<std::endl;
 
   stk::mesh::Part& nodePart = bulk.mesh_meta_data().get_cell_topology_root_part(stk::mesh::get_cell_topology(stk::topology::NODE));
   stk::mesh::PartVector nodeParts = {&nodePart};
+std::cout<<"c3:"<<ids.size()<<std::endl;
 
   std::vector<stk::mesh::Entity> nodes;
   nodes.reserve(ids.size());
@@ -197,11 +212,14 @@ void process_nodeblocks(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::Pa
   for (size_t i=0; i < ids.size(); i++) {
     bulk.set_local_id(nodes[i], i);
   }
+std::cout<<"c4"<<std::endl;
 
 #ifdef STK_BUILT_IN_SIERRA
   process_node_sharing<INT>(region, bulk);
 #else
   process_node_sharing<INT>(region, bulk, comm);
+  std::cout<<"c5"<<std::endl;
+
 #endif
 }
 

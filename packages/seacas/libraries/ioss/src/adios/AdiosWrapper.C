@@ -16,14 +16,42 @@ namespace Ioad {
     adios2::IO bpio = this->ADIOS::DeclareIO("io");
     std::string engine = "BPFile";
     std::string transport = "File";
+    std::string library = "POSIX";
     adios2::Params transport_parameters = {{"Library", "POSIX"}};
-
-    if (properties.exists("engine")) {
-      engine = properties.get("engine").get_string();
+    // Set engine based on properties
+    if (properties.exists("Engine")) {
+      engine = properties.get("Engine").get_string();
     }
     bpio.SetEngine(engine);
-    
+    // Set transport based on properties
+    if (properties.exists("Transport")) {
+      transport = properties.get("Transport").get_string();
+    }
+    // if(transport == "File") // Leave transport parameters to default value.
+    if(transport == "WAN") {
+      transport_parameters = {{"Library", "ZMQ"}, {"IPAddress", "127.0.0.1"}};
+    }
+    else if (transport == "InSituMPI") {
+      transport_parameters = {};
+    }
+    else if (transport == "SST") {
+      transport_parameters = {{"MarshalMethod", "BP"}};
+    }
+    // Set transport parameters based on properties
+    if (properties.exists("Library")) {
+      transport_parameters["Library"] = properties.get("Library").get_string();
+    }
+    if (properties.exists("IPAddress")) {
+      transport_parameters["IPAddress"] = properties.get("IPAddress").get_string();
+    }
+    if (properties.exists("MarshalMethod")) {
+      transport_parameters["MarshalMethod"] = properties.get("MarshalMethod").get_string();
+    }
+    if (properties.exists("verbose")) {
+      transport_parameters["verbose"] = properties.get("verbose").get_string();
+    }
     bpio.AddTransport(transport, transport_parameters);
+    // TODO: Add support for passing parameters, such as "num_threads".
     return bpio;
   }
 
