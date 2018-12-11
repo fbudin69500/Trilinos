@@ -52,7 +52,7 @@
 #include "Ioss_Region.h"          // for Region, SideSetContainer, etc
 #include "Ioss_SideBlock.h"       // for SideBlock
 #include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
-#include "Ioss_VariableType.h"    // for VariableType
+//#include "Ioss_VariableType.h"    // for VariableType
 #include <Ioss_CodeTypes.h>       // for HAVE_MPI
 #include <Ioss_ElementTopology.h> // for NameList
 #include <Ioss_ParallelUtils.h>   // for ParallelUtils, etc
@@ -246,6 +246,15 @@ namespace Ioad {
     }
   }
 
+  std::string DatabaseIO::stringify_side_block_names(const Ioss::SideBlockContainer &sblocks) const
+  {
+    std::string stringified_sblock_names;
+    for (auto sblock : sblocks) {
+      stringified_sblock_names += Sideblock_separator + sblock->name();
+    }
+    return stringified_sblock_names;
+  }
+
   template <>
   void DatabaseIO::write_meta_data_container<Ioss::SideSetContainer>(const Ioss::SideSetContainer &ssets)
   {
@@ -259,15 +268,12 @@ namespace Ioad {
       std::string encoded_name = encode_sideblock_name(entity_type, entity_name);
 
       std::string stringified_sblock_names;
-      adios2::Variable<std::string> sblocks_var =
-          adios_wrapper.InquireVariable<std::string>(encoded_name);
+      adios2::Variable<char> sblocks_var =
+          adios_wrapper.InquireVariable<char>(encoded_name);
       if (sblocks_var) {
-        std::string stringified_sblock_names;
-        for (auto sblock : sblocks) {
-          stringified_sblock_names += Sideblock_separator + sblock->name();
-        }
-        adios_wrapper.Put<std::string>(
-            encoded_name, stringified_sblock_names,
+        std::string stringified_sblock_names = stringify_side_block_names(sblocks);
+        adios_wrapper.Put<char>(
+            sblocks_var, stringified_sblock_names.c_str(),
             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       }
       else {
@@ -620,13 +626,13 @@ namespace Ioad {
     // SideBlocks ...
     for (auto &sset : ssets) {
       std::string encoded_name = encode_sideblock_name(sset->type_string(), sset->name());
-
-      adios2::Variable<std::string> sblocks_var =
-          adios_wrapper.InquireVariable<std::string>(encoded_name);
-      if (!sblocks_var) {
-        adios_wrapper.DefineVariable<std::string>(encoded_name);
-      }
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
+      adios2::Variable<char> sblocks_var =
+          adios_wrapper.InquireVariable<char>(encoded_name);
+      if (!sblocks_var) {
+        std::string stringified_side_block_names = stringify_side_block_names(sblocks);
+        adios_wrapper.DefineVariable<char>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()});
+      }
       define_entity_internal(sblocks, role);
     }
   }
@@ -1108,12 +1114,12 @@ namespace Ioad {
           }
           std::string encoded_name =
               encode_field_name({entity_type, entity_name, variable_pair.first});
-          adios2::Variable<std::string> sideblock_var =
-              adios_wrapper.InquireVariable<std::string>(encoded_name);
+          adios2::Variable<char> sideblock_var =
+              adios_wrapper.InquireVariable<char>(encoded_name);
           if (sideblock_var) {
             std::cout<<"Sideblock encoded list:"<<encoded_name<<std::endl;
-            std::string stringified_names;
-            adios_wrapper.Get<std::string>(sideblock_var, stringified_names, adios2::Mode::Sync);
+            char* stringified_names;
+            adios_wrapper.Get<char>(sideblock_var, stringified_names, adios2::Mode::Sync);
             for (std::string block_name : Ioss::tokenize(stringified_names, Sideblock_separator)) {
               std::cout<<"sidebloick:" << block_name<<std::endl;
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
@@ -1296,6 +1302,10 @@ namespace Ioad {
   {
     FieldInfoType infos;
     auto   v    = adios_wrapper.InquireVariable<T>(var_name);
+    // Dimension is expected to be 3 because:
+    // 0 = rank
+    // 1 = size of field
+    // 2 = number of components
     size_t ndim = v.Shape().size();
     if (ndim != 3) {
       std::ostringstream errmsg;
@@ -1328,43 +1338,52 @@ namespace Ioad {
     // Get VariableType
     infos.variable_type = adios_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
 
-    //bool first = true;
     for (auto &blockpair : allblocks) {
       std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
-      //for(auto &block: blocks) {
-      // Sanity checks
-      if (blocks[rank].Start[2] != 0) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Number of components should always start at 0.\n";
-        IOSS_ERROR(errmsg);
+      // Find in vector if this variable is defined for the current rank process. This means
+      // that there is one block for which the rank encoded as the first value in the `Start` array
+      // matches the current rank.
+      for (auto &block : blocks) {
+        if (block.Start[0] != rank) {
+          // This is not the block corresponding to the current process (rank).
+          continue;
+        }
+        // Sanity checks
+        if (block.Start[2] != 0) {
+          std::ostringstream errmsg;
+          errmsg << "ERROR: Number of components should always start at 0.\n";
+          IOSS_ERROR(errmsg);
+        }
+        if (!block.Count[0] || !block.Count[1] || !block.Count[2]) {
+          std::ostringstream errmsg;
+          errmsg << "ERROR: Block information does not contain Count.\n";
+          IOSS_ERROR(errmsg);
+        }
+        // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
+        // of node count for this variable. Dimension=2 encodes the number of components for this
+        // variables, and should always start at 0;
+        size_t block_component_count = block.Count[2];
+        size_t block_node_boundaries_size = block.Count[1];
+        if (blockpair.first == 0) {
+          // infos.node_boundaries_start = block_node_boundaries_start;
+          infos.node_boundaries_size = block_node_boundaries_size;
+          infos.component_count      = block_component_count;
+        }
+        else if (block_node_boundaries_size != infos.node_boundaries_size ||
+                 // block_node_boundaries_start != infos.node_boundaries_start ||
+                 block_component_count != infos.component_count) {
+          std::ostringstream errmsg;
+          errmsg
+              << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
+          IOSS_ERROR(errmsg);
+        }
+        // }
+        // Steps: will save last step
+        infos.steps.push_back(blockpair.first);
+        // We found the block we were searching for, no need to continue looping over all
+        // the other blocks.
+        break;
       }
-      if (!blocks[rank].Count[0] || !blocks[rank].Count[1] || !blocks[rank].Count[2]) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Block information does not contain Count.\n";
-        IOSS_ERROR(errmsg);
-      }
-      // Only query the block size of the current process based on the process rank.
-      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
-      // of node count for this variable. Dimension=2 encodes the number of components for this
-      // variables, and should always start at 0;
-      size_t block_component_count       = blocks[rank].Count[2];
-      //size_t block_node_boundaries_start = block.Start[1];
-      size_t block_node_boundaries_size  = blocks[rank].Count[1];
-      if (blockpair.first == 0) {
-        //infos.node_boundaries_start = block_node_boundaries_start;
-        infos.node_boundaries_size  = block_node_boundaries_size;
-        infos.component_count       = block_component_count;
-      }
-      else if (block_node_boundaries_size != infos.node_boundaries_size ||
-               //block_node_boundaries_start != infos.node_boundaries_start ||
-               block_component_count != infos.component_count) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
-        IOSS_ERROR(errmsg);
-      }
-     // }
-      // Steps: will save last step
-      infos.steps.push_back(blockpair.first);
     }
     infos.basic_type = template_to_basic_type<T>();
     return infos;
@@ -1482,7 +1501,7 @@ namespace Ioad {
     check_side_topology();
 
     get_entities<Ioss::SideSet>(fields_map, properties_map);
-    //get_entities<Ioss::NodeSet>(fields_map, properties_map);
+    get_entities<Ioss::NodeSet>(fields_map, properties_map);
     get_entities<Ioss::EdgeSet>(fields_map, properties_map);
     get_entities<Ioss::FaceSet>(fields_map, properties_map);
     get_entities<Ioss::ElementSet>(fields_map, properties_map);

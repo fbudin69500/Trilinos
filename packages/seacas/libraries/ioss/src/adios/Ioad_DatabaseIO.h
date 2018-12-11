@@ -38,6 +38,7 @@
 #include <Ioss_DatabaseIO.h>
 #include "Ioss_EntitySet.h"
 
+#include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
 
 #include "Ioss_Field.h" // for Field, etc
 #include <AdiosWrapper.h>
@@ -168,10 +169,11 @@ namespace Ioad {
 
     struct FieldInfoType
     {
+      // Information contained in block infos.
       std::vector<size_t>    steps;
-      //size_t                 node_boundaries_start;
-      size_t                 node_boundaries_size;
-      size_t                 component_count = {0};
+      size_t                 node_boundaries_size = 0;
+      size_t                 component_count = 0;
+      // Contained in metavariables
       Ioss::Field::RoleType  role;
       std::string            variable_type;
       Ioss::Field::BasicType basic_type;
@@ -236,6 +238,8 @@ namespace Ioad {
     void add_entity_properties(Ioss::GroupingEntity *ge, const FieldsMapType &properties_map, std::string name = "");
 
     void write_properties(const Ioss::GroupingEntity * const entity, const std::string & encoded_name);
+
+    std::string stringify_side_block_names(const Ioss::SideBlockContainer &sblocks) const;
 
     template <typename T> void write_meta_data_container(const T &entity_blocks);
 
