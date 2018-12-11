@@ -978,6 +978,9 @@ namespace Ioad {
                                        const std::string &property_name)
   {
     T variable;
+    // Meta variable read with `Get()` instead of `GetMetaVariable()` because name is already
+    // encoded. `GetMetaVariable()` simply encodes the variable name as a meta variable before
+    // performing a `Get()` call.
     adios_wrapper.Get<T>(encoded_name, variable,
                          adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     Ioss::Property property(property_name, variable);
@@ -1054,6 +1057,9 @@ namespace Ioad {
         errmsg << "ERROR: Property type `" << type << "` doesn't match expected type `"<< expected_type << "`.\n";
         IOSS_ERROR(errmsg);
       }
+      // Meta variable read with `Get()` instead of `GetMetaVariable()` because name is already
+      // encoded. `GetMetaVariable()` simply encodes the variable name as a meta variable before
+      // performing a `Get()` call.
       adios_wrapper.Get<T>(encoded_name, property_value,
                          adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
@@ -1119,7 +1125,7 @@ namespace Ioad {
           if (sideblock_var) {
             std::cout<<"Sideblock encoded list:"<<encoded_name<<std::endl;
             char* stringified_names;
-            adios_wrapper.Get<char>(sideblock_var, stringified_names, adios2::Mode::Sync);
+            get_data<char>(static_cast<void*>(stringified_names), encoded_name);
             for (std::string block_name : Ioss::tokenize(stringified_names, Sideblock_separator)) {
               std::cout<<"sidebloick:" << block_name<<std::endl;
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
