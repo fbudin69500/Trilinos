@@ -638,7 +638,8 @@ namespace Ioad {
       //     adios_wrapper.InquireVariable<char>(encoded_name);
       if (!sblocks_var) {
         std::string stringified_side_block_names = stringify_side_block_names(sblocks);
-        adios_wrapper.DefineVariable<int8_t>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()});
+         //String size +1 to have space to save '\0' final character.
+        adios_wrapper.DefineVariable<int8_t>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()+1});
         //adios_wrapper.DefineVariable<char>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()});
       }
       define_entity_internal(sblocks, role);
@@ -1133,10 +1134,13 @@ namespace Ioad {
 
           if (sideblock_var) {
             // TODO: Remove this hardcoded size and manage variable (delete)
-            char* stringified_names = new char[1000];
+            BlockInfoType block_infos = get_block_infos<int8_t>(sideblock_var);
+            char* stringified_names = new char[block_infos.Count[1]];
             get_data<int8_t>(static_cast<void*>(stringified_names), variable_pair.second.first);
             //get_data<char>(static_cast<void*>(stringified_names), variable_pair.second.first);
-            for (std::string block_name : Ioss::tokenize(stringified_names, Sideblock_separator)) {
+            std::vector<std::string> block_names = Ioss::tokenize(stringified_names, Sideblock_separator);
+            delete []stringified_names;
+            for (std::string block_name : block_names) {
               std::cout<<"sidebloick:" << block_name<<std::endl;
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
                 bool first = true;
@@ -1313,47 +1317,17 @@ namespace Ioad {
     }
   }
 
-  template <typename T>
-  DatabaseIO::FieldInfoType DatabaseIO::get_variable_infos(const std::string &var_name) const
+  template<typename T>
+  DatabaseIO::BlockInfoType DatabaseIO::get_block_infos(const adios2::Variable<T> &var) const
   {
-    FieldInfoType infos;
-    auto   v    = adios_wrapper.InquireVariable<T>(var_name);
-    // Dimension is expected to be 3 because:
-    // 0 = rank
-    // 1 = size of field
-    // 2 = number of components
-    size_t ndim = v.Shape().size();
-    if (ndim != 3) {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: BP variable dimension should be 3.\n";
-      IOSS_ERROR(errmsg);
-    }
-    // For non-transient variables, not all blocks need to be loaded. Might improve speed.
     std::map<size_t, std::vector<typename adios2::Variable<T>::Info>> allblocks =
-        adios_wrapper.AllStepsBlocksInfo(v);
+        adios_wrapper.AllStepsBlocksInfo(var);
     if (allblocks.empty()) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Empty BP variable\n";
       IOSS_ERROR(errmsg);
     }
-    size_t laststep = allblocks.rbegin()->first;
-    // Only transient fields can have steps.
-    infos.role =
-        static_cast<Ioss::Field::RoleType>(adios_wrapper.GetMetaVariable<int>(Role_meta, var_name));
-    if (infos.role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: Last step should be 0 for non-transient fields. "
-             << "Something is wrong in the Ioad::DatabaseIO::get_variable_size() function.\n";
-      IOSS_ERROR(errmsg);
-    }
-
-    // Get topology: Only relevant for blocks, not for sets.
-    infos.topology = get_optional_string_variable(var_name, Topology_meta);
-    // Get parent topology: Only relevant for sideblocks.
-    infos.parent_topology = get_optional_string_variable(var_name, Parent_topology_meta);
-    // Get VariableType
-    infos.variable_type = adios_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
-
+    BlockInfoType infos;
     for (auto &blockpair : allblocks) {
       std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
       // Find in vector if this variable is defined for the current rank process. This means
@@ -1364,30 +1338,11 @@ namespace Ioad {
           // This is not the block corresponding to the current process (rank).
           continue;
         }
-        // Sanity checks
-        if (block.Start[2] != 0) {
-          std::ostringstream errmsg;
-          errmsg << "ERROR: Number of components should always start at 0.\n";
-          IOSS_ERROR(errmsg);
-        }
-        if (!block.Count[0] || !block.Count[1] || !block.Count[2]) {
-          std::ostringstream errmsg;
-          errmsg << "ERROR: Block information does not contain Count.\n";
-          IOSS_ERROR(errmsg);
-        }
-        // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
-        // of node count for this variable. Dimension=2 encodes the number of components for this
-        // variables, and should always start at 0;
-        size_t block_component_count = block.Count[2];
-        size_t block_node_boundaries_size = block.Count[1];
         if (blockpair.first == 0) {
           // infos.node_boundaries_start = block_node_boundaries_start;
-          infos.node_boundaries_size = block_node_boundaries_size;
-          infos.component_count      = block_component_count;
+          infos.Count = block.Count;
         }
-        else if (block_node_boundaries_size != infos.node_boundaries_size ||
-                 // block_node_boundaries_start != infos.node_boundaries_start ||
-                 block_component_count != infos.component_count) {
+        else if (infos.Count != block.Count) {
           std::ostringstream errmsg;
           errmsg
               << "ERROR: Variable changes sizes over steps. Not supported by Ioad::DatabaseIO.\n";
@@ -1401,7 +1356,52 @@ namespace Ioad {
         break;
       }
     }
+    return infos;
+  }
+
+  template <typename T>
+  DatabaseIO::FieldInfoType DatabaseIO::get_variable_infos(const std::string &var_name) const
+  {
+    FieldInfoType infos;
+    adios2::Variable<T> var = adios_wrapper.InquireVariable<T>(var_name);
+
+    // Dimension is expected to be 3 because:
+    // 0 = rank
+    // 1 = size of field
+    // 2 = number of components
+    size_t ndim = var.Shape().size();
+    if (ndim != 3) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: BP variable dimension should be 3.\n";
+      IOSS_ERROR(errmsg);
+    }
+    BlockInfoType block_infos = get_block_infos<T>(var);
+    size_t laststep = 0;
+    if(!block_infos.steps.empty()) {
+      laststep = block_infos.steps.back();
+      // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
+      // of node count for this variable. Dimension=2 encodes the number of components for this
+      // variables, and should always start at 0;
+      infos.component_count      = block_infos.Count[2];
+      infos.node_boundaries_size = block_infos.Count[1];
+      infos.steps                = block_infos.steps;
+    }
+    // Get topology: Only relevant for blocks, not for sets.
+    infos.topology = get_optional_string_variable(var_name, Topology_meta);
+    // Get parent topology: Only relevant for sideblocks.
+    infos.parent_topology = get_optional_string_variable(var_name, Parent_topology_meta);
+    // Get VariableType
+    infos.variable_type = adios_wrapper.GetMetaVariable<std::string>(Var_type_meta, var_name);
     infos.basic_type = template_to_basic_type<T>();
+    // Only transient fields can have steps.
+    infos.role =
+        static_cast<Ioss::Field::RoleType>(adios_wrapper.GetMetaVariable<int>(Role_meta, var_name));
+    if (infos.role != Ioss::Field::RoleType::TRANSIENT && laststep != 0) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Last step should be 0 for non-transient fields. "
+             << "Something is wrong in the Ioad::DatabaseIO::get_variable_size() function.\n";
+      IOSS_ERROR(errmsg);
+    }
     return infos;
   }
 

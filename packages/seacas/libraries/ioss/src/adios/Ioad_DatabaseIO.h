@@ -167,12 +167,18 @@ namespace Ioad {
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
 
+    struct BlockInfoType
+    {
+      std::vector<size_t> steps;
+      adios2::Dims Count;
+    };
+
     struct FieldInfoType
     {
       // Information contained in block infos.
-      std::vector<size_t>    steps;
-      size_t                 node_boundaries_size = 0;
-      size_t                 component_count = 0;
+      std::vector<size_t> steps;
+      size_t              node_boundaries_size = 0;
+      size_t              component_count      = 0;
       // Contained in metavariables
       Ioss::Field::RoleType  role;
       std::string            variable_type;
@@ -186,7 +192,9 @@ namespace Ioad {
       unsigned long processor_id = -1;
       unsigned long processor_number = -1;
     };
-  
+    template<typename T>
+    BlockInfoType get_block_infos(const adios2::Variable<T> &var) const;
+
     template <typename T> FieldInfoType get_variable_infos(const std::string &var_name) const;
     using GlobalMapType = std::map<std::string, std::pair<std::string, std::string>>;
     using EntityMapType = std::map<std::string, GlobalMapType>;
