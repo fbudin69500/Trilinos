@@ -1676,21 +1676,26 @@ namespace Ioad {
       const std::string &field_name = field.get_name();
 
       std::string encoded_name = encode_field_name({entity_type, entity_name, field_name});
+      bool use_step_selection = false;
+      if(field.get_role() == Ioss::Field::RoleType::TRANSIENT && !adios_wrapper.IsStreaming())
+      {
+        use_step_selection = true;
+      }
       switch (field.get_type()) {
       case Ioss::Field::BasicType::DOUBLE:
-        get_data<double>(data, encoded_name);
+        get_data<double>(data, encoded_name, use_step_selection);
         break;
       case Ioss::Field::BasicType::INT32:
-        get_data<int32_t>(data, encoded_name);
+        get_data<int32_t>(data, encoded_name, use_step_selection);
         break;
       case Ioss::Field::BasicType::INT64:
-        get_data<int64_t>(data, encoded_name);
+        get_data<int64_t>(data, encoded_name, use_step_selection);
         break;
       case Ioss::Field::BasicType::COMPLEX:
-        get_data<Complex>(data, encoded_name);
+        get_data<Complex>(data, encoded_name, use_step_selection);
         break;
       case Ioss::Field::BasicType::CHARACTER:
-        get_data<char>(data, encoded_name);
+        get_data<char>(data, encoded_name, use_step_selection);
         break;
       default:
         std::ostringstream errmsg;
@@ -1704,7 +1709,7 @@ namespace Ioad {
   }
 
   template <typename T>
-  void DatabaseIO::get_data(void *data, const std::string &encoded_name) const
+  void DatabaseIO::get_data(void *data, const std::string &encoded_name, bool use_step_selection) const
   {
     std::cout<<"get data:"<<encoded_name<<std::endl;
     adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
@@ -1716,6 +1721,15 @@ namespace Ioad {
       offset[0]=rank;
 
       entities.SetSelection(adios2::Box<adios2::Dims>(offset, size));
+      //if transient, set step that should be read if not streaming.
+      if(use_step_selection) {// && !adios_wrapper.IsStreaming()) {
+          size_t step = get_current_state();
+          entities.SetStepSelection(std::make_pair(step, 1));
+      }
+      else {
+          // if streaming, we are reading step selected by `BeginStep()/EndStep()`.
+      }
+
       // TODO: Set selection per rank. Support written by N processes, and loaded by M processes.
       adios_wrapper.Get<T>(entities, rdata,
                            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
@@ -1778,6 +1792,22 @@ namespace Ioad {
         }
       }
     }
+  }
+
+  int DatabaseIO::get_current_state() const
+  {
+    // value returned is 1-based, whereas ADIOS expect 0-based values
+    int step = get_region()->get_current_state() - 1;
+
+    if (step < 0) {
+      std::ostringstream errmsg;
+      errmsg << "ERROR: No currently active state.  The calling code must call "
+                "Ioss::Region::begin_state(int step)\n"
+             << "       to set the database timestep from which to read the transient data.\n"
+             << "       [" << get_filename() << "]\n";
+      IOSS_ERROR(errmsg);
+    }
+    return step;
   }
 
 } // namespace Ioad

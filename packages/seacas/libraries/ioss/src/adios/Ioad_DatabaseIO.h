@@ -109,7 +109,7 @@ namespace Ioad {
     int64_t get_field_internal_t(const Ioss::GroupingEntity *entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
     template <typename T>
-    void get_data(void *data, const std::string &encoded_name) const;
+    void get_data(void *data, const std::string &encoded_name, bool use_step_selection = false) const;
 
     int64_t put_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
@@ -166,6 +166,8 @@ namespace Ioad {
 
     bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
                                  const std::string &field_name) const;
+
+    int get_current_state() const;
 
     struct BlockInfoType
     {
