@@ -1689,7 +1689,7 @@ namespace Ioad {
     }
     else {
         std::ostringstream errmsg;
-        errmsg << "ERROR: Required `"<< Processor_id_meta <<"` variable not found in file.\n";
+        errmsg << "ERROR: Required `"<< encoded_name <<"` variable not found in file.\n";
         IOSS_ERROR(errmsg);
     }
   }
