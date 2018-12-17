@@ -1170,7 +1170,7 @@ namespace Ioad {
                   if (!sideblock->field_exists(sideblock_field_pair.first)) {
                     Ioss::Field field(field_name, block_infos.basic_type, block_infos.variable_type,
                                       block_infos.role, block_infos.node_boundaries_size);
-                   //sideblock->field_add(field);
+                    sideblock->field_add(field);
                     //                                  side_block->set_parent_element_block(block);
                   }
                 }
