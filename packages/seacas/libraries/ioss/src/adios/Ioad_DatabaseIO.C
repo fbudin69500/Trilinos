@@ -153,6 +153,7 @@ namespace Ioad {
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
     set_logging(false);
+    is_streaming = adios_wrapper.IsStreaming();
   }
 
   // Used to force `rank` initialization before creating `adios_wrapper`.
@@ -167,8 +168,10 @@ namespace Ioad {
 
   bool DatabaseIO::begin__(Ioss::State state)
   {
+    std::cout<<"begin__"<<state<<" " << Ioss::STATE_DEFINE_MODEL <<std::endl;
     dbState = state;
-    if (state == Ioss::STATE_MODEL) {
+    //if (state == Ioss::STATE_MODEL) {
+    if (state == Ioss::STATE_DEFINE_MODEL) {
       adios_wrapper.BeginStep();
     }
     return true;
@@ -322,6 +325,7 @@ namespace Ioad {
   bool DatabaseIO::end__(Ioss::State state)
   {
     // Transitioning out of state 'state'
+    std::cout<<"State: "<<state<<std::endl;
     assert(state == dbState);
     switch (state) {
     case Ioss::STATE_DEFINE_MODEL:
@@ -333,6 +337,11 @@ namespace Ioad {
       break;
     case Ioss::STATE_DEFINE_TRANSIENT:
       if (!is_input()) {
+        if(is_streaming) {
+          // If streaming, we need to write the meta data available at
+          // every step.
+          write_meta_data();
+        }
         Ioss::Field::RoleType role = Ioss::Field::RoleType::TRANSIENT;
         define_model(&role);
       }
@@ -350,7 +359,11 @@ namespace Ioad {
 
   bool DatabaseIO::begin_state__(Ioss::Region * /* region */, int state, double time)
   {
+    std::cout<<"begin_state__"<<std::endl;
     if (!is_input()) {
+      // `BeginStep()` should not be used at the same time as random access. Since at read time,
+      // we currrently read variables with random access, `BeginStep()` should not be used
+      // at read time.
       // Begin  step for transient data
       adios_wrapper.BeginStep();
       // Add time to adios
@@ -365,6 +378,11 @@ namespace Ioad {
       }
     }
     else {
+      if(adios_wrapper.IsStreaming()) {
+        std::cout<<"ISSTREAMING"<<std::endl;
+          // Begin  step for transient data
+          //adios_wrapper.BeginStep();
+      }
       // TODO: Figure out if something needs to be done here.
       // Store reduction variables
       // read_reduction_fields();
@@ -375,10 +393,12 @@ namespace Ioad {
   // common
   bool DatabaseIO::end_state__(Ioss::Region * /*region*/, int state, double time)
   {
-    if (!is_input()) {
+    std::cout<<"end_state__"<<std::endl;
+
+    //if (!is_input()) {
       // End step for transient data
       adios_wrapper.EndStep();
-    }
+    //}
     return true;
   }
 
@@ -1407,6 +1427,7 @@ namespace Ioad {
 
   void DatabaseIO::get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map)
   {
+    std::cout<<"get_globals"<<std::endl;
     // Check "time" attribute and global variable.
     adios2::Attribute<double> timeScaleFactor_attr =
         adios_wrapper.InquireAttribute<double>(Time_scale_factor);
@@ -1423,13 +1444,24 @@ namespace Ioad {
       // Load time steps
       // 1) Check that the time type is `double` as expected.
       adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
-      std::vector<double>      tsteps(1);
       if (time_var) {
+        std::vector<double>      tsteps(time_var.Steps());
+        std::cout<<"Steps:" << time_var.Steps() << std::endl;
+        if(!adios_wrapper.IsStreaming()) {
+          time_var.SetStepSelection(std::make_pair(time_var.StepsStart(), time_var.Steps())); // Doesn't work with streaming.
+        }
+        else {
+          // For streaming, we probably only want to read the current time as we do not want to 
+          // use SetStepSelection that would prohibit the usage of `BeginStep()/EndStep()`.
+          std::ostringstream errmsg;
+          errmsg << "ERROR: Streaming is not yet supported for reading.\n";
+          IOSS_ERROR(errmsg);
+        }
+        adios_wrapper.Get(time_var, tsteps.data(), adios2::Mode::Sync);
         for (size_t step = 0; step < time_var.Steps(); step++) {
+          std::cout<<"Step:"<<step<<std::endl;
           // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
-          time_var.SetStepSelection(std::make_pair(step, 1)); // Check with streaming.
-          adios_wrapper.Get(time_var, tsteps.data(), adios2::Mode::Sync);
-          this_region->add_state__(tsteps[0] * timeScaleFactor);
+          this_region->add_state__(tsteps[step] * timeScaleFactor);
         }
       }
       else {
@@ -1460,6 +1492,7 @@ namespace Ioad {
 
   void DatabaseIO::read_meta_data__()
   {
+    std::cout<<"read_meta_data__"<<std::endl;
     // Only get schema version attribute as it is the only one we expect.
     get_attribute<unsigned int>(Schema_version_string);
 

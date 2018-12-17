@@ -298,6 +298,7 @@ namespace Ioad {
                                         // and bp_engine to be initialized first.
     int           spatialDimension{0};
     unsigned long number_proc;
+    bool is_streaming;
 
     ProcessorInfo proc_info;
   };

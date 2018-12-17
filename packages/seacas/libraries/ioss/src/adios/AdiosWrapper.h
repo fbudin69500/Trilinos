@@ -27,6 +27,8 @@ namespace Ioad {
     std::string    EncodeMetaVariable(const std::string &meta_name,
                                       const std::string &variable_name = "") const;
 
+    bool IsStreaming() const {return m_IsStreaming;};
+
     using adios2::Engine::AllStepsBlocksInfo;
     using adios2::Engine::Get;
     using adios2::Engine::Put;
@@ -37,7 +39,7 @@ namespace Ioad {
     using adios2::IO::InquireVariable;
 
   private:
-    adios2::IO     IOInit(const Ioss::PropertyManager &properties);
+    adios2::IO     IOInit(const Ioss::PropertyManager &properties, bool is_input);
     adios2::Engine EngineInit(const std::string &filename, bool is_input);
 
 
@@ -50,6 +52,7 @@ namespace Ioad {
     // adios2::IO             m_BPIO;
     //  mutable adios2::Engine m_BPEngine;
     bool m_OpenStep;
+    bool m_IsStreaming;
   };
 
 } // end of namespace Ioad

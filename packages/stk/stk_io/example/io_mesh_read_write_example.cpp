@@ -246,7 +246,9 @@ std::cout<<"20"<<std::endl;
 	      bool lower_case_variable_names,
 	      int  integer_size,
 	      stk::io::HeartbeatType hb_type,
-	      int interpolation_intervals)
+	      int interpolation_intervals,
+        const std::string &engine_in,
+        const std::string &engine_out)
   {
     stk::io::StkMeshIoBroker mesh_data(MPI_COMM_WORLD);
 
@@ -279,7 +281,14 @@ std::cout<<"20"<<std::endl;
       mesh_data.property_add(Ioss::Property("INTEGER_SIZE_DB", integer_size));
       mesh_data.property_add(Ioss::Property("INTEGER_SIZE_API", integer_size));
     }
-
+    if (!engine_in.empty()) {
+      Ioss::Property property("Engine_in", engine_in);
+      mesh_data.property_add(property);
+    }
+    if (!engine_out.empty()) {
+      Ioss::Property property("Engine_out", engine_out);
+      mesh_data.property_add(property);
+    }
     mesh_read_write(type, working_directory, filename, mesh_data, integer_size, hb_type,
 		    interpolation_intervals);
   }
@@ -289,12 +298,14 @@ namespace bopt = boost::program_options;
 
 int main(int argc, char** argv)
 {
-  int a;
+  //int a;
   //std::cin>>a;
   std::string working_directory = "";
   std::string decomp_method = "";
   std::string mesh = "";
   std::string type = "exodusii";
+  std::string engine_in = "bpfile";
+  std::string engine_out = "bpfile";
   int compression_level = 0;
   int interpolation_intervals = 0;
   bool compression_shuffle = false;
@@ -323,6 +334,8 @@ int main(int argc, char** argv)
      "Method to use for parallel io. One of mpiio, mpiposix, or pnetcdf")
     ("heartbeat_format", bopt::value<std::string>(&heartbeat_format),
      "Format of heartbeat output. One of binary, csv, text, ts_text, spyhis, [none]")
+    ("engine_in", bopt::value<std::string>(&engine_in), "engine used by adios for input data")
+    ("engine_out", bopt::value<std::string>(&engine_out), "engine used by adios for output data")
     ("interpolate", bopt::value<int>(&interpolation_intervals), "number of intervals to divide each input time step into")
     ("integer_size", bopt::value<int>(&integer_size), "use 4 or 8-byte integers for input and output" );
 
@@ -380,7 +393,7 @@ int main(int argc, char** argv)
   driver(parallel_io,
 	 working_directory, mesh, type, decomp_method, compose_output, 
 	 compression_level, compression_shuffle, lc_names, integer_size, hb_type,
-	 interpolation_intervals);
+	 interpolation_intervals, engine_in, engine_out);
 
   stk::parallel_machine_finalize();
   return 0;

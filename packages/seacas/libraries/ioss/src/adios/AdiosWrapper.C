@@ -1,17 +1,19 @@
 #include "adios/AdiosWrapper.h"
 
+#include <algorithm>
+
 namespace Ioad {
 
   AdiosWrapper::AdiosWrapper(MPI_Comm comm, const std::string &filename, bool is_input,
                              unsigned long rank, const Ioss::PropertyManager &properties)
       : adios2::ADIOS(comm),
-        m_Communicator(comm), adios2::IO(IOInit(properties)), adios2::Engine(
+        m_Communicator(comm), adios2::IO(IOInit(properties, is_input)), adios2::Engine(
                                                         EngineInit(filename, is_input)),
         m_OpenStep(false), m_Rank(rank)
   {
   }
 
-  adios2::IO AdiosWrapper::IOInit(const Ioss::PropertyManager &properties)
+  adios2::IO AdiosWrapper::IOInit(const Ioss::PropertyManager &properties, bool is_input)
   {
     adios2::IO bpio = this->ADIOS::DeclareIO("io");
     std::string engine = "BPFile";
@@ -19,10 +21,33 @@ namespace Ioad {
     std::string library = "POSIX";
     adios2::Params transport_parameters = {{"Library", "POSIX"}};
     // Set engine based on properties
-    if (properties.exists("Engine")) {
-      engine = properties.get("Engine").get_string();
+    if(is_input && properties.exists("Engine_in")) {
+      engine = properties.get("Engine_in").get_string();
     }
+    if(!is_input && properties.exists("Engine_out")) {
+      engine = properties.get("Engine_out").get_string();
+    }
+    if(engine == "") {
+      // By default, use BPFile. This is the default in ADIOS, but this enforces that
+      // if the default changes in ADIOS, it doesn't change here.
+      engine == "BPFile";
+    }
+    std::transform(engine.begin(), engine.end(), engine.begin(), ::tolower);
+    // if (properties.exists("Engine")) {
+    //   engine = properties.get("Engine").get_string();
+    // }
     bpio.SetEngine(engine);
+    // TODO: See if there is a way to avoid hardcoding this list
+    // of engines (and possibly engines have multiple corresponding
+    // strings).
+    if(engine == "bpfile" || engine == "hdf5" ) {
+      m_IsStreaming = false;
+    }
+    else {
+      m_IsStreaming = true;
+    }
+    std::cout<<"engine:"<<engine<<std::endl;
+    std::cout<<"streaming:"<<m_IsStreaming<<std::endl;
     // Set transport based on properties
     if (properties.exists("Transport")) {
       transport = properties.get("Transport").get_string();
