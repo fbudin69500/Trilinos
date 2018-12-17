@@ -172,6 +172,8 @@ namespace Ioad {
     dbState = state;
     //if (state == Ioss::STATE_MODEL) {
     if (state == Ioss::STATE_DEFINE_MODEL) {
+      // Should `BeginStep()` only be if (!is_input() || is_streaming) ???
+
       adios_wrapper.BeginStep();
     }
     return true;
@@ -378,10 +380,11 @@ namespace Ioad {
       }
     }
     else {
-      if(adios_wrapper.IsStreaming()) {
+      if(is_streaming) {
         std::cout<<"ISSTREAMING"<<std::endl;
-          // Begin  step for transient data
-          //adios_wrapper.BeginStep();
+          // Begin step for transient data if streaming. Otherwise, data will be accessed with
+          // `SetStepSelection()`.
+          adios_wrapper.BeginStep();
       }
       // TODO: Figure out if something needs to be done here.
       // Store reduction variables
@@ -1453,15 +1456,15 @@ namespace Ioad {
       if (time_var) {
         std::vector<double>      tsteps(time_var.Steps());
         std::cout<<"Steps:" << time_var.Steps() << std::endl;
-        if(!adios_wrapper.IsStreaming()) {
+        if(!is_streaming) {
           time_var.SetStepSelection(std::make_pair(time_var.StepsStart(), time_var.Steps())); // Doesn't work with streaming.
         }
         else {
           // For streaming, we probably only want to read the current time as we do not want to 
           // use SetStepSelection that would prohibit the usage of `BeginStep()/EndStep()`.
-          std::ostringstream errmsg;
-          errmsg << "ERROR: Streaming is not yet supported for reading.\n";
-          IOSS_ERROR(errmsg);
+          // std::ostringstream errmsg;
+          // errmsg << "ERROR: Streaming is not yet supported for reading.\n";
+          // IOSS_ERROR(errmsg);
         }
         adios_wrapper.Get(time_var, tsteps.data(), adios2::Mode::Sync);
         for (size_t step = 0; step < time_var.Steps(); step++) {
@@ -1683,7 +1686,7 @@ namespace Ioad {
 
       std::string encoded_name = encode_field_name({entity_type, entity_name, field_name});
       bool use_step_selection = false;
-      if(field.get_role() == Ioss::Field::RoleType::TRANSIENT && !adios_wrapper.IsStreaming())
+      if(field.get_role() == Ioss::Field::RoleType::TRANSIENT && !is_streaming)
       {
         use_step_selection = true;
       }
@@ -1728,7 +1731,7 @@ namespace Ioad {
 
       entities.SetSelection(adios2::Box<adios2::Dims>(offset, size));
       //if transient, set step that should be read if not streaming.
-      if(use_step_selection) {// && !adios_wrapper.IsStreaming()) {
+      if(use_step_selection) {
           size_t step = get_current_state();
           entities.SetStepSelection(std::make_pair(step, 1));
       }
@@ -1741,9 +1744,14 @@ namespace Ioad {
                            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
     }
     else {
+      if (!is_streaming) {
         std::ostringstream errmsg;
-        errmsg << "ERROR: Required `"<< encoded_name <<"` variable not found in file.\n";
+        errmsg << "ERROR: Required `" << encoded_name << "` variable not found in file.\n";
         IOSS_ERROR(errmsg);
+      }
+      else {
+        IOSS_WARNING << "WARNING: The variable `" << encoded_name << "` was not found.\n";
+      }
     }
   }
 
