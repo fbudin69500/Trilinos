@@ -475,18 +475,24 @@ namespace Ioad {
   {
     std::vector<std::string> property_list;
     entity_block->property_describe(&property_list);
+
     for (auto ignore_property : Ignore_properties) {
       property_list.erase(std::remove(property_list.begin(), property_list.end(), ignore_property),
                           property_list.end());
     }
-    for (auto property_name : property_list) {
-      Ioss::Property property = entity_block->get_property(property_name);
-      if (property.is_invalid() && property.is_implicit()) {
-        property_list.erase(std::remove(property_list.begin(), property_list.end(), property_name),
-                            property_list.end());
-      }
-      return property_list;
-    }
+    property_list.erase(std::remove_if(property_list.begin(), property_list.end(),
+                                       [&](std::string property_name) -> bool {
+                                         Ioss::Property property =
+                                             entity_block->get_property(property_name);
+                                         if (property.is_invalid() || property.is_implicit()) {
+                                           return true;
+                                         }
+                                         else {
+                                           return false;
+                                         }
+                                       }),
+                        property_list.end());
+    return property_list;
   }
 
   void DatabaseIO::define_properties(const Ioss::GroupingEntity *const entity_block,
