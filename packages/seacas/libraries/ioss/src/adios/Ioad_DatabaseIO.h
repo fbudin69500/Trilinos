@@ -290,8 +290,8 @@ namespace Ioad {
     std::vector<std::string> properties_to_save(const Ioss::GroupingEntity *const entity_block);
 
     int  RankInit();
-    bool begin_state__(Ioss::Region * /* region */, int state, double time);
-    bool end_state__(Ioss::Region * /*region*/, int state, double time);
+    bool begin_state__(Ioss::Region * region, int state, double time);
+    bool end_state__(Ioss::Region * region, int state, double time);
 
     int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
                              const std::map<std::string, std::set<std::string>> &mapset) const;

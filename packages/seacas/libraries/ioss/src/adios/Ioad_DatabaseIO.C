@@ -121,7 +121,7 @@ namespace Ioad {
     const std::string     Time_scale_factor     = "time_scale_factor";
     const std::string     Time_meta             = "time";
     const std::string     Processor_id_meta     = "processor_id";
-    const std::string     Processor_number_meta = "processor_number";
+    const std::string     Processor_number_meta = "proignocessor_number";
     const std::string     globals_entity_type   = "globals";
     const std::string     globals_entity_name   = "";
     const std::string     region_name           = "no_name";
@@ -140,7 +140,7 @@ namespace Ioad {
         {"CommSet", {"ids"}},
         {"SideSet", {"ids"}},
         {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
-    const std::vector<std::string> Ignore_properties = {{"name", "_base_stk_part_name", "db_name"}};
+    const std::vector<std::string> Ignore_properties = {{"name", "_base_stk_part_name", "db_name", "streaming_status", "streaming"}};
   } // namespace
 
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
@@ -153,7 +153,6 @@ namespace Ioad {
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
     set_logging(false);
-    is_streaming = adios_wrapper.IsStreaming();
   }
 
   // Used to force `rank` initialization before creating `adios_wrapper`.
@@ -174,7 +173,8 @@ namespace Ioad {
     if (state == Ioss::STATE_DEFINE_MODEL) {
       // Should `BeginStep()` only be if (!is_input() || is_streaming) ???
 
-      adios_wrapper.BeginStep();
+      adios2::StepStatus status = adios_wrapper.BeginStep();
+      get_region()->property_update("streaming_status", static_cast<int>(status));
     }
     return true;
   }
@@ -359,7 +359,7 @@ namespace Ioad {
     return true;
   }
 
-  bool DatabaseIO::begin_state__(Ioss::Region * /* region */, int state, double time)
+  bool DatabaseIO::begin_state__(Ioss::Region * region, int state, double time)
   {
     std::cout<<"begin_state__"<<std::endl;
     if (!is_input()) {
@@ -367,7 +367,9 @@ namespace Ioad {
       // we currrently read variables with random access, `BeginStep()` should not be used
       // at read time.
       // Begin  step for transient data
-      adios_wrapper.BeginStep();
+      adios2::StepStatus status = adios_wrapper.BeginStep();
+      region->property_update("streaming_status", static_cast<int>(status));
+
       // Add time to adios
       adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
       if (time_var) {
@@ -384,7 +386,9 @@ namespace Ioad {
         std::cout<<"ISSTREAMING"<<std::endl;
           // Begin step for transient data if streaming. Otherwise, data will be accessed with
           // `SetStepSelection()`.
-          adios_wrapper.BeginStep();
+          adios2::StepStatus status = adios_wrapper.BeginStep();
+          region->property_update("streaming_status", static_cast<int>(status));
+
       }
       // TODO: Figure out if something needs to be done here.
       // Store reduction variables
@@ -394,13 +398,15 @@ namespace Ioad {
   }
 
   // common
-  bool DatabaseIO::end_state__(Ioss::Region * /*region*/, int state, double time)
+  bool DatabaseIO::end_state__(Ioss::Region *region, int state, double time)
   {
     std::cout<<"end_state__"<<std::endl;
 
     //if (!is_input()) {
       // End step for transient data
       adios_wrapper.EndStep();
+      region->property_update("streaming_status", -1);
+
     //}
     return true;
   }
@@ -612,6 +618,14 @@ namespace Ioad {
   {
 
     Ioss::Region *                  region      = get_region();
+    // Define properties
+    region->property_add(Ioss::Property("streaming_status", -1)); // implicit property
+    is_streaming = adios_wrapper.IsStreaming();
+    if(is_streaming) {
+       region->property_add(Ioss::Property("streaming", 1)); // implicit property
+    }
+
+
     const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
 
     // A single nodeblock named "nodeblock_1" will be created for the mesh. It contains information

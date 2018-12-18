@@ -169,12 +169,31 @@ std::cout<<"12"<<std::endl;
 
     // Determine number of timesteps on input database...
     int timestep_count = io_region->get_property("state_count").get_int();
+    int is_streaming = 0;
+    if(io_region->property_exists("streaming")) {
+      is_streaming = io_region->get_property("streaming").get_int();
+    }
 
-    if (timestep_count == 0 ) {
+    if (timestep_count == 0)
+    {
       mesh_data.write_output_mesh(results_index);
     }
-    else {
-      for (int step=1; step <= timestep_count; step++) {
+    else
+    {
+      for (int step = 1; step <= timestep_count; step++)
+      {
+        if (is_streaming)
+        {
+          // Create a fake infinite loop
+          timestep_count++;
+
+          int status = io_region->get_property("streaming_status").get_int();
+          if (status != 0)
+          {
+            std::cout << "Streaming done. Status:" << status << std::endl;
+            break;
+          }
+        }
 	double time = io_region->get_state_time(step);
 	if (step == timestep_count)
 	  interpolation_intervals = 1;

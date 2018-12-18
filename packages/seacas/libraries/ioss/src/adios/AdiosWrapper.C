@@ -96,20 +96,18 @@ namespace Ioad {
     this->Engine::Close();
   }
 
-  void AdiosWrapper::BeginStep()
+  adios2::StepStatus AdiosWrapper::BeginStep()
   {
     if (!m_OpenStep) {
-      if (this->Engine::BeginStep() != adios2::StepStatus::OK) {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: `BeginStep()` did not return OK.\n";
-      }
-      else {
-        // If we are here, `BeginStep()` worked.
+      adios2::StepStatus status = this->Engine::BeginStep();
+      if (status == adios2::StepStatus::OK) {
         m_OpenStep = true;
       }
+      return status;
     }
-    // Either we took called `BeginStep()` successfully or we didn't need to. Either
+    // Either we  called `BeginStep()` successfully or we didn't need to. Either
     // way, there was no issue.
+    return adios2::StepStatus::OK;
   }
 
   void AdiosWrapper::EndStep()

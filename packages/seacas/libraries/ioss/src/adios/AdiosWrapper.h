@@ -14,7 +14,7 @@ namespace Ioad {
                  unsigned long rank, const Ioss::PropertyManager &properties);
     AdiosWrapper(AdiosWrapper &&wrapper);
     ~AdiosWrapper();
-    void BeginStep();
+    adios2::StepStatus BeginStep();
     void EndStep();
     template <typename T>
     void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name = "");
