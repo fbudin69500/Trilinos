@@ -100,6 +100,7 @@ namespace Ioad {
   {
     if (!m_OpenStep) {
       adios2::StepStatus status = this->Engine::BeginStep();
+      std::cout<<"begin call:"<< count_real_begin ++ << std::endl;
       if (status == adios2::StepStatus::OK) {
         m_OpenStep = true;
       }

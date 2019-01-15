@@ -53,6 +53,8 @@ namespace Ioad {
     //  mutable adios2::Engine m_BPEngine;
     bool m_OpenStep;
     bool m_IsStreaming;
+    int count_real_begin = 0;
+
   };
 
 } // end of namespace Ioad

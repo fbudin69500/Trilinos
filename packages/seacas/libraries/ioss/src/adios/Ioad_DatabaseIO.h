@@ -301,6 +301,7 @@ namespace Ioad {
     int           spatialDimension{0};
     unsigned long number_proc;
     bool is_streaming;
+    double previous_time_streaming;
 
     ProcessorInfo proc_info;
   };

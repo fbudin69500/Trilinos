@@ -153,6 +153,9 @@ namespace Ioad {
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
     set_logging(false);
+    // Streaming initialization
+    is_streaming = adios_wrapper.IsStreaming();
+    previous_time_streaming = -1.0;
   }
 
   // Used to force `rank` initialization before creating `adios_wrapper`.
@@ -168,13 +171,18 @@ namespace Ioad {
   bool DatabaseIO::begin__(Ioss::State state)
   {
     std::cout<<"begin__"<<state<<" " << Ioss::STATE_DEFINE_MODEL <<std::endl;
+    // initialization
+    Ioss::Region *    this_region = get_region();
+
+    //this_region->property_update("streaming_status", -1);
+
     dbState = state;
     //if (state == Ioss::STATE_MODEL) {
     if (state == Ioss::STATE_DEFINE_MODEL) {
       // Should `BeginStep()` only be if (!is_input() || is_streaming) ???
 
       adios2::StepStatus status = adios_wrapper.BeginStep();
-      get_region()->property_update("streaming_status", static_cast<int>(status));
+      this_region->property_update("streaming_status", static_cast<int>(status));
     }
     return true;
   }
@@ -404,7 +412,11 @@ namespace Ioad {
 
     //if (!is_input()) {
       // End step for transient data
+    // End step only for writing. Streaming is closed in `BeginStep()` call if time is different
+    // from previous time.
+    //if (!is_streaming || !is_input()) {
       adios_wrapper.EndStep();
+    //}
       region->property_update("streaming_status", -1);
 
     //}
@@ -618,14 +630,6 @@ namespace Ioad {
   {
 
     Ioss::Region *                  region      = get_region();
-    // Define properties
-    region->property_add(Ioss::Property("streaming_status", -1)); // implicit property
-    is_streaming = adios_wrapper.IsStreaming();
-    if(is_streaming) {
-       region->property_add(Ioss::Property("streaming", 1)); // implicit property
-    }
-
-
     const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
 
     // A single nodeblock named "nodeblock_1" will be created for the mesh. It contains information
@@ -1516,6 +1520,10 @@ namespace Ioad {
   void DatabaseIO::read_meta_data__()
   {
     std::cout<<"read_meta_data__"<<std::endl;
+    // Define properties
+    if(is_streaming) {
+       get_region()->property_update("streaming", 1);
+    }
     // Only get schema version attribute as it is the only one we expect.
     get_attribute<unsigned int>(Schema_version_string);
 

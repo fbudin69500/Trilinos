@@ -184,8 +184,7 @@ std::cout<<"12"<<std::endl;
       {
         if (is_streaming)
         {
-          // Create a fake infinite loop
-          timestep_count++;
+          timestep_count == step;
 
           int status = io_region->get_property("streaming_status").get_int();
           if (status != 0)
@@ -194,7 +193,14 @@ std::cout<<"12"<<std::endl;
             break;
           }
         }
+        else {
+          
+        }
+  std::cout<<"before get state time"<<std::endl;
+  // TODO: in Streaming, we shouldn't have to specify the step we are getting. It is just the next step.
 	double time = io_region->get_state_time(step);
+    std::cout << step << " " << time << std::endl;
+  std::cout<<"after get state time"<<std::endl;
 	if (step == timestep_count)
 	  interpolation_intervals = 1;
 	
@@ -250,6 +256,12 @@ std::cout<<"20"<<std::endl;
 	// application, Just being done here to verify that the
 	// function exists and does not core dump.  
 	mesh_data.flush_output();
+  std::cout<<"after flush output " << step<<std::endl;
+        if (is_streaming)
+        {
+          // create fake infinite loop
+          timestep_count++;
+        }
       }
     }
   }
