@@ -57,6 +57,7 @@ namespace {
   // Do the actual reading and writing of the mesh database and
   // creation and population of the MetaData and BulkData.
   void mesh_read_write(const std::string &type,
+           const std::string &type_out,
 		       const std::string &working_directory,
 		       const std::string &filename,
 		       stk::io::StkMeshIoBroker &mesh_data,
@@ -95,11 +96,7 @@ std::cout<<"3"<<std::endl;
     // This call adds an output database for results data to mesh_data.
     // No data is written at this time other than verifying that the
     // file can be created on the disk.
-    #ifdef HAVE_SEACASIOSS_ADIOS2
-    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS, "adios");
-    #else
-    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS);
-    #endif
+    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS, type_out.c_str());
 std::cout<<"4"<<std::endl;
 
     // Create restart output ...  ("generated_mesh.restart") ("exodus_mesh.restart")
@@ -283,6 +280,7 @@ std::cout<<"20"<<std::endl;
 	      const std::string &working_directory,
 	      const std::string &filename,
 	      const std::string &type,
+        const std::string &type_out,
 	      const std::string &decomp_method,
 	      bool compose_output,
 	      int  compression_level,
@@ -339,7 +337,7 @@ std::cout<<"20"<<std::endl;
       mesh_data.property_add(property);
     }
     #endif
-    mesh_read_write(type, working_directory, filename, mesh_data, integer_size, hb_type,
+    mesh_read_write(type, type_out, working_directory, filename, mesh_data, integer_size, hb_type,
 		    interpolation_intervals);
   }
 }
@@ -354,6 +352,7 @@ int main(int argc, char** argv)
   std::string decomp_method = "";
   std::string mesh = "";
   std::string type = "exodusii";
+  std::string type_out = "exodusii";
   #ifdef HAVE_SEACASIOSS_ADIOS2
   std::string engine_in = "bpfile";
   std::string engine_out = "bpfile";
@@ -386,6 +385,7 @@ int main(int argc, char** argv)
      "Method to use for parallel io. One of mpiio, mpiposix, or pnetcdf")
     ("heartbeat_format", bopt::value<std::string>(&heartbeat_format),
      "Format of heartbeat output. One of binary, csv, text, ts_text, spyhis, [none]")
+    ("type_out", bopt::value<std::string>(&type_out), "output mesh type")
     #ifdef HAVE_SEACASIOSS_ADIOS2
     ("engine_in", bopt::value<std::string>(&engine_in), "engine used by adios for input data")
     ("engine_out", bopt::value<std::string>(&engine_out), "engine used by adios for output data")
@@ -429,6 +429,7 @@ int main(int argc, char** argv)
     type = "adios";
   }
   #endif
+
   stk::io::HeartbeatType hb_type = stk::io::NONE; // Default is no heartbeat output
   if (heartbeat_format == "none")
     hb_type = stk::io::NONE;
@@ -444,9 +445,8 @@ int main(int argc, char** argv)
     hb_type = stk::io::TS_TEXT;
   else if (heartbeat_format == "spyhis")
     hb_type = stk::io::SPYHIS;
-
   driver(parallel_io,
-	 working_directory, mesh, type, decomp_method, compose_output, 
+	 working_directory, mesh, type, type_out, decomp_method, compose_output,
 	 compression_level, compression_shuffle, lc_names, integer_size, hb_type,
 	 interpolation_intervals
    #ifdef HAVE_SEACASIOSS_ADIOS2
