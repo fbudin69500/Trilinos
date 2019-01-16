@@ -48,7 +48,9 @@
 #include <stk_io/StkMeshIoBroker.hpp>
 
 #include <Ionit_Initializer.h>
+#ifdef HAVE_SEACASIOSS_ADIOS2
 #include <adios/Ioad_Initializer.h>
+#endif
 #include <Ioss_SubSystem.h>
 
 namespace {
@@ -64,7 +66,9 @@ namespace {
   {
     if (interpolation_intervals == 0)
       interpolation_intervals = 1;
+    #ifdef HAVE_SEACASIOSS_ADIOS2
     Ioad::Initializer(); // ADIOS2
+    #endif
     std::string file = working_directory;
     file += filename;
 
@@ -91,7 +95,11 @@ std::cout<<"3"<<std::endl;
     // This call adds an output database for results data to mesh_data.
     // No data is written at this time other than verifying that the
     // file can be created on the disk.
+    #ifdef HAVE_SEACASIOSS_ADIOS2
     size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS, "adios");
+    #else
+    size_t results_index = mesh_data.create_output_mesh(output_filename, stk::io::WRITE_RESULTS);
+    #endif
 std::cout<<"4"<<std::endl;
 
     // Create restart output ...  ("generated_mesh.restart") ("exodus_mesh.restart")
@@ -169,11 +177,12 @@ std::cout<<"12"<<std::endl;
 
     // Determine number of timesteps on input database...
     int timestep_count = io_region->get_property("state_count").get_int();
+    #ifdef HAVE_SEACASIOSS_ADIOS2
     int is_streaming = 0;
     if(io_region->property_exists("streaming")) {
       is_streaming = io_region->get_property("streaming").get_int();
     }
-
+    #endif
     if (timestep_count == 0)
     {
       mesh_data.write_output_mesh(results_index);
@@ -182,6 +191,7 @@ std::cout<<"12"<<std::endl;
     {
       for (int step = 1; step <= timestep_count; step++)
       {
+        #ifdef HAVE_SEACASIOSS_ADIOS2
         if (is_streaming)
         {
           timestep_count == step;
@@ -196,6 +206,7 @@ std::cout<<"12"<<std::endl;
         else {
           
         }
+        #endif
   std::cout<<"before get state time"<<std::endl;
   // TODO: in Streaming, we shouldn't have to specify the step we are getting. It is just the next step.
 	double time = io_region->get_state_time(step);
@@ -257,11 +268,13 @@ std::cout<<"20"<<std::endl;
 	// function exists and does not core dump.  
 	mesh_data.flush_output();
   std::cout<<"after flush output " << step<<std::endl;
+        #ifdef HAVE_SEACASIOSS_ADIOS2
         if (is_streaming)
         {
           // create fake infinite loop
           timestep_count++;
         }
+        #endif
       }
     }
   }
@@ -277,9 +290,13 @@ std::cout<<"20"<<std::endl;
 	      bool lower_case_variable_names,
 	      int  integer_size,
 	      stk::io::HeartbeatType hb_type,
-	      int interpolation_intervals,
+	      int interpolation_intervals
+        #ifdef HAVE_SEACASIOSS_ADIOS2
+        ,
         const std::string &engine_in,
-        const std::string &engine_out)
+        const std::string &engine_out
+        #endif
+        )
   {
     stk::io::StkMeshIoBroker mesh_data(MPI_COMM_WORLD);
 
@@ -312,6 +329,7 @@ std::cout<<"20"<<std::endl;
       mesh_data.property_add(Ioss::Property("INTEGER_SIZE_DB", integer_size));
       mesh_data.property_add(Ioss::Property("INTEGER_SIZE_API", integer_size));
     }
+    #ifdef HAVE_SEACASIOSS_ADIOS2
     if (!engine_in.empty()) {
       Ioss::Property property("Engine_in", engine_in);
       mesh_data.property_add(property);
@@ -320,6 +338,7 @@ std::cout<<"20"<<std::endl;
       Ioss::Property property("Engine_out", engine_out);
       mesh_data.property_add(property);
     }
+    #endif
     mesh_read_write(type, working_directory, filename, mesh_data, integer_size, hb_type,
 		    interpolation_intervals);
   }
@@ -335,8 +354,10 @@ int main(int argc, char** argv)
   std::string decomp_method = "";
   std::string mesh = "";
   std::string type = "exodusii";
+  #ifdef HAVE_SEACASIOSS_ADIOS2
   std::string engine_in = "bpfile";
   std::string engine_out = "bpfile";
+  #endif
   int compression_level = 0;
   int interpolation_intervals = 0;
   bool compression_shuffle = false;
@@ -365,8 +386,10 @@ int main(int argc, char** argv)
      "Method to use for parallel io. One of mpiio, mpiposix, or pnetcdf")
     ("heartbeat_format", bopt::value<std::string>(&heartbeat_format),
      "Format of heartbeat output. One of binary, csv, text, ts_text, spyhis, [none]")
+    #ifdef HAVE_SEACASIOSS_ADIOS2
     ("engine_in", bopt::value<std::string>(&engine_in), "engine used by adios for input data")
     ("engine_out", bopt::value<std::string>(&engine_out), "engine used by adios for output data")
+    #endif
     ("interpolate", bopt::value<int>(&interpolation_intervals), "number of intervals to divide each input time step into")
     ("integer_size", bopt::value<int>(&integer_size), "use 4 or 8-byte integers for input and output" );
 
@@ -400,11 +423,12 @@ int main(int argc, char** argv)
     mesh = mesh.substr(7, mesh.size());
     type = "pamgen";
   }
+  #ifdef HAVE_SEACASIOSS_ADIOS2
   else if (strncasecmp("adios:", mesh.c_str(), 6) == 0) {
     mesh = mesh.substr(6, mesh.size());
     type = "adios";
   }
-
+  #endif
   stk::io::HeartbeatType hb_type = stk::io::NONE; // Default is no heartbeat output
   if (heartbeat_format == "none")
     hb_type = stk::io::NONE;
@@ -424,7 +448,11 @@ int main(int argc, char** argv)
   driver(parallel_io,
 	 working_directory, mesh, type, decomp_method, compose_output, 
 	 compression_level, compression_shuffle, lc_names, integer_size, hb_type,
-	 interpolation_intervals, engine_in, engine_out);
+	 interpolation_intervals
+   #ifdef HAVE_SEACASIOSS_ADIOS2
+   , engine_in, engine_out
+   #endif
+   );
 
   stk::parallel_machine_finalize();
   return 0;
