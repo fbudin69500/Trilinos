@@ -170,7 +170,6 @@ namespace Ioad {
 
   bool DatabaseIO::begin__(Ioss::State state)
   {
-    std::cout<<"begin__"<<state<<" " << Ioss::STATE_DEFINE_MODEL <<std::endl;
     // initialization
     Ioss::Region *    this_region = get_region();
 
@@ -335,7 +334,6 @@ namespace Ioad {
   bool DatabaseIO::end__(Ioss::State state)
   {
     // Transitioning out of state 'state'
-    std::cout<<"State: "<<state<<std::endl;
     assert(state == dbState);
     switch (state) {
     case Ioss::STATE_DEFINE_MODEL:
@@ -369,7 +367,6 @@ namespace Ioad {
 
   bool DatabaseIO::begin_state__(int state, double time)
   {
-    std::cout<<"begin_state__"<<std::endl;
     Ioss::Region *    this_region = get_region();
     if (!is_input()) {
       // `BeginStep()` should not be used at the same time as random access. Since at read time,
@@ -392,7 +389,6 @@ namespace Ioad {
     }
     else {
       if(is_streaming) {
-        std::cout<<"ISSTREAMING"<<std::endl;
           // Begin step for transient data if streaming. Otherwise, data will be accessed with
           // `SetStepSelection()`.
           adios2::StepStatus status = adios_wrapper.BeginStep();
@@ -409,7 +405,6 @@ namespace Ioad {
   // common
   bool DatabaseIO::end_state__(int state, double time)
   {
-    std::cout<<"end_state__"<<std::endl;
     Ioss::Region *    this_region = get_region();
 
     //if (!is_input()) {
@@ -749,7 +744,6 @@ namespace Ioad {
   {
     adios2::Variable<T> entities = adios_wrapper.InquireVariable<T>(encoded_name);
     if (entities) {
-      std::cout<<"Writing " << encoded_name << std::endl;
       T *rdata = static_cast<T *>(data);
       adios_wrapper.Put<T>(entities, rdata,
                            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
@@ -1143,7 +1137,6 @@ namespace Ioad {
     const EntityMapType &sideblocks_map = fields_map.at(sideblock_type);
     for (auto &entity : sidesets_map) {
       std::string    entity_name = entity.first;
-      std::cout<<"Sideset:"<<entity_name<<std::endl;
       Ioss::SideSet *ss          = new Ioss::SideSet(this, entity_name);
       bool           ss_added    = get_region()->add(ss);
       add_entity_properties(ss, properties_map);
@@ -1156,9 +1149,7 @@ namespace Ioad {
         // loading the file.
         // First, check that field is actually a field and not a list of sideblocks
         if (!is_sideblock_name(variable_pair.first)) {
-          std::cout<<"not sideblock:"<<variable_pair.first<<std::endl;
           if (!ss->field_exists(variable_pair.first)) {
-            std::cout<<"sideset add field"<<std::endl;
             FieldInfoType infos = get_variable_infos_from_map(sidesets_map, entity_type,
                                                               entity_name, variable_pair.first);
             // TODO: Should we have a sanity check to verify that the field size is the same as
@@ -1169,7 +1160,6 @@ namespace Ioad {
           }
         }
         else {
-          std::cout<<"sideblock:"<<variable_pair.first<<std::endl;
           // The field in the bp file is actually a list of sideblocks
           // If no sideblock, don't worry about this section and move on to the next
           // sideset.
@@ -1190,12 +1180,10 @@ namespace Ioad {
             std::vector<std::string> block_names = Ioss::tokenize(stringified_names, Sideblock_separator);
             delete []stringified_names;
             for (std::string block_name : block_names) {
-              std::cout<<"sidebloick:" << block_name<<std::endl;
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
                 bool first = true;
                 for (auto &sideblock_field_pair : sideblocks_map.at(block_name)) {
                   std::string   field_name  = sideblock_field_pair.first;
-                  std::cout<<"sideblock field:"<<field_name<<std::endl;
                   FieldInfoType block_infos = get_variable_infos_from_map(
                       sideblocks_map, sideblock_type, block_name, field_name);
                   // Create sideblock first
@@ -1456,7 +1444,6 @@ namespace Ioad {
 
   void DatabaseIO::get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map)
   {
-    std::cout<<"get_globals"<<std::endl;
     // Check "time" attribute and global variable.
     adios2::Attribute<double> timeScaleFactor_attr =
         adios_wrapper.InquireAttribute<double>(Time_scale_factor);
@@ -1475,7 +1462,6 @@ namespace Ioad {
       adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
       if (time_var) {
         std::vector<double>      tsteps(time_var.Steps());
-        std::cout<<"Steps:" << time_var.Steps() << std::endl;
         if(!is_streaming) {
           time_var.SetStepSelection(std::make_pair(time_var.StepsStart(), time_var.Steps())); // Doesn't work with streaming.
         }
@@ -1488,7 +1474,6 @@ namespace Ioad {
         }
         adios_wrapper.Get(time_var, tsteps.data(), adios2::Mode::Sync);
         for (size_t step = 0; step < time_var.Steps(); step++) {
-          std::cout<<"Step:"<<step<<std::endl;
           // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
           this_region->add_state__(tsteps[step] * timeScaleFactor);
         }
@@ -1521,7 +1506,6 @@ namespace Ioad {
 
   void DatabaseIO::read_meta_data__()
   {
-    std::cout<<"read_meta_data__"<<std::endl;
     // Define properties
     if(is_streaming) {
        get_region()->property_update("streaming", 1);
@@ -1744,7 +1728,6 @@ namespace Ioad {
   template <typename T>
   void DatabaseIO::get_data(void *data, const std::string &encoded_name, bool use_step_selection) const
   {
-    std::cout<<"get data:"<<encoded_name<<std::endl;
     adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
