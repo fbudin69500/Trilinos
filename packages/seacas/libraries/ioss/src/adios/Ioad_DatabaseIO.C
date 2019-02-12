@@ -367,16 +367,17 @@ namespace Ioad {
     return true;
   }
 
-  bool DatabaseIO::begin_state__(Ioss::Region * region, int state, double time)
+  bool DatabaseIO::begin_state__(int state, double time)
   {
     std::cout<<"begin_state__"<<std::endl;
+    Ioss::Region *    this_region = get_region();
     if (!is_input()) {
       // `BeginStep()` should not be used at the same time as random access. Since at read time,
       // we currrently read variables with random access, `BeginStep()` should not be used
       // at read time.
       // Begin  step for transient data
       adios2::StepStatus status = adios_wrapper.BeginStep();
-      region->property_update("streaming_status", static_cast<int>(status));
+      this_region->property_update("streaming_status", static_cast<int>(status));
 
       // Add time to adios
       adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
@@ -395,7 +396,7 @@ namespace Ioad {
           // Begin step for transient data if streaming. Otherwise, data will be accessed with
           // `SetStepSelection()`.
           adios2::StepStatus status = adios_wrapper.BeginStep();
-          region->property_update("streaming_status", static_cast<int>(status));
+          this_region->property_update("streaming_status", static_cast<int>(status));
 
       }
       // TODO: Figure out if something needs to be done here.
@@ -406,9 +407,10 @@ namespace Ioad {
   }
 
   // common
-  bool DatabaseIO::end_state__(Ioss::Region *region, int state, double time)
+  bool DatabaseIO::end_state__(int state, double time)
   {
     std::cout<<"end_state__"<<std::endl;
+    Ioss::Region *    this_region = get_region();
 
     //if (!is_input()) {
       // End step for transient data
@@ -417,7 +419,7 @@ namespace Ioad {
     //if (!is_streaming || !is_input()) {
       adios_wrapper.EndStep();
     //}
-      region->property_update("streaming_status", -1);
+      this_region->property_update("streaming_status", -1);
 
     //}
     return true;
