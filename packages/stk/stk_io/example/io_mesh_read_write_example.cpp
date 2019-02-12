@@ -105,8 +105,8 @@ namespace {
     for (size_t i=0; i < fields.size(); i++) {
       const Ioss::Field::RoleType* role = stk::io::get_field_role(*fields[i]);
       if ( role && *role == Ioss::Field::TRANSIENT ) {
-	mesh_data.add_field(restart_index, *fields[i]); // restart output
-	mesh_data.add_field(results_index, *fields[i]); // results output
+	      mesh_data.add_field(restart_index, *fields[i]); // restart output
+	      mesh_data.add_field(results_index, *fields[i]); // results output
       }
     }
 
@@ -169,22 +169,17 @@ namespace {
       is_streaming = io_region->get_property("streaming").get_int();
     }
     #endif
-    if (timestep_count == 0)
-    {
+    if (timestep_count == 0) {
       mesh_data.write_output_mesh(results_index);
     }
-    else
-    {
-      for (int step = 1; step <= timestep_count; step++)
-      {
+    else {
+      for (int step = 1; step <= timestep_count; step++) {
         #ifdef HAVE_SEACASIOSS_ADIOS2
-        if (is_streaming)
-        {
+        if (is_streaming) {
           timestep_count == step;
 
           int status = io_region->get_property("streaming_status").get_int();
-          if (status != 0)
-          {
+          if (status != 0) {
             std::cout << "Streaming done. Status:" << status << std::endl;
             break;
           }
@@ -193,63 +188,61 @@ namespace {
           
         }
         #endif
-  // TODO: in Streaming, we shouldn't have to specify the step we are getting. It is just the next step.
-	double time = io_region->get_state_time(step);
-    std::cout << step << " " << time << std::endl;
-	if (step == timestep_count)
-	  interpolation_intervals = 1;
-	
-	int step_end = step < timestep_count ? step+1 : step;
-	double tend =  io_region->get_state_time(step_end);
-	double tbeg = time;
-	double delta = (tend - tbeg) / static_cast<double>(interpolation_intervals);
-	
-	for (int interval = 0; interval < interpolation_intervals; interval++) {
-	  // Normally, an app would only process the restart input at a single step and
-	  // then continue with execution at that point.  Here just for testing, we are
-	  // reading restart data at each step on the input restart file/mesh and then
-	  // outputting that data to the restart and results output.
-	  time = tbeg + delta * static_cast<double>(interval);
+        // TODO: in Streaming, we shouldn't have to specify the step we are getting. It is just the next step.
+        double time = io_region->get_state_time(step);
+          std::cout << step << " " << time << std::endl;
+        if (step == timestep_count)
+          interpolation_intervals = 1;
+        
+        int step_end = step < timestep_count ? step+1 : step;
+        double tend =  io_region->get_state_time(step_end);
+        double tbeg = time;
+        double delta = (tend - tbeg) / static_cast<double>(interpolation_intervals);
+        
+        for (int interval = 0; interval < interpolation_intervals; interval++) {
+          // Normally, an app would only process the restart input at a single step and
+          // then continue with execution at that point.  Here just for testing, we are
+          // reading restart data at each step on the input restart file/mesh and then
+          // outputting that data to the restart and results output.
+          time = tbeg + delta * static_cast<double>(interval);
 
-	  mesh_data.read_defined_input_fields(time);
-	  mesh_data.begin_output_step(restart_index, time);
-	  mesh_data.begin_output_step(results_index, time);
+          mesh_data.read_defined_input_fields(time);
+          mesh_data.begin_output_step(restart_index, time);
+          mesh_data.begin_output_step(results_index, time);
 
-	  mesh_data.write_defined_output_fields(restart_index);
-	  mesh_data.write_defined_output_fields(results_index);
+          mesh_data.write_defined_output_fields(restart_index);
+          mesh_data.write_defined_output_fields(results_index);
 
-	  // Transfer all global variables from the input mesh to the
-	  // restart and results databases
-	  stk::util::ParameterMapType::const_iterator i = parameters.begin();
-	  stk::util::ParameterMapType::const_iterator iend = parameters.end();
-	  for (; i != iend; ++i) {
-	    const std::string parameterName = (*i).first;
-	    stk::util::Parameter &parameter = parameters.get_param(parameterName);
-	    mesh_data.get_global(parameterName, parameter.value, parameter.type);
-	  }
+          // Transfer all global variables from the input mesh to the
+          // restart and results databases
+          stk::util::ParameterMapType::const_iterator i = parameters.begin();
+          stk::util::ParameterMapType::const_iterator iend = parameters.end();
+          for (; i != iend; ++i) {
+            const std::string parameterName = (*i).first;
+            stk::util::Parameter &parameter = parameters.get_param(parameterName);
+            mesh_data.get_global(parameterName, parameter.value, parameter.type);
+          }
 
-	  for (i=parameters.begin(); i != iend; ++i) {
-	    const std::string parameterName = (*i).first;
-	    stk::util::Parameter parameter = (*i).second;
-	    mesh_data.write_global(restart_index, parameterName, parameter.value, parameter.type);
-	    mesh_data.write_global(results_index, parameterName, parameter.value, parameter.type);
-	  }
+          for (i=parameters.begin(); i != iend; ++i) {
+            const std::string parameterName = (*i).first;
+            stk::util::Parameter parameter = (*i).second;
+            mesh_data.write_global(restart_index, parameterName, parameter.value, parameter.type);
+            mesh_data.write_global(results_index, parameterName, parameter.value, parameter.type);
+          }
 
-	  mesh_data.end_output_step(restart_index);
-	  mesh_data.end_output_step(results_index);
+          mesh_data.end_output_step(restart_index);
+          mesh_data.end_output_step(results_index);
 
-	}
-	if (hb_type != stk::io::NONE && !global_fields.empty()) {
-	  mesh_data.process_heartbeat_output(heart, step, time);
-	}
-
-	// Flush the data.  This is not necessary in a normal
-	// application, Just being done here to verify that the
-	// function exists and does not core dump.  
-	mesh_data.flush_output();
+        }
+        if (hb_type != stk::io::NONE && !global_fields.empty()) {
+          mesh_data.process_heartbeat_output(heart, step, time);
+        }
+        // Flush the data.  This is not necessary in a normal
+        // application, Just being done here to verify that the
+        // function exists and does not core dump.  
+        mesh_data.flush_output();
         #ifdef HAVE_SEACASIOSS_ADIOS2
-        if (is_streaming)
-        {
+        if (is_streaming) {
           // create fake infinite loop
           timestep_count++;
         }
