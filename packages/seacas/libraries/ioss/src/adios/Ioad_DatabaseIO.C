@@ -287,14 +287,14 @@ namespace Ioad {
       std::string encoded_name = encode_sideblock_name(entity_type, entity_name);
 
       std::string stringified_sblock_names;
-      adios2::Variable<int8_t> sblocks_var =
-          adios_wrapper.InquireVariable<int8_t>(encoded_name);
+      adios2::Variable<std::string> sblocks_var =
+          adios_wrapper.InquireVariable<std::string>(encoded_name);
       // adios2::Variable<char> sblocks_var =
       //     adios_wrapper.InquireVariable<char>(encoded_name);
       if (sblocks_var) {
         std::string stringified_sblock_names = stringify_side_block_names(sblocks);
-        adios_wrapper.Put<int8_t>(
-            sblocks_var, reinterpret_cast<const int8_t*>(stringified_sblock_names.c_str()),
+        adios_wrapper.Put<std::string>(
+            sblocks_var, stringified_sblock_names,
             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
           // adios_wrapper.Put<char>(
           //   sblocks_var, stringified_sblock_names.c_str(),
@@ -691,14 +691,13 @@ namespace Ioad {
     for (auto &sset : ssets) {
       std::string encoded_name = encode_sideblock_name(sset->type_string(), sset->name());
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
-      adios2::Variable<int8_t> sblocks_var =
-          adios_wrapper.InquireVariable<int8_t>(encoded_name);
+      adios2::Variable<std::string> sblocks_var =
+          adios_wrapper.InquireVariable<std::string>(encoded_name);
       // adios2::Variable<char> sblocks_var =
       //     adios_wrapper.InquireVariable<char>(encoded_name);
       if (!sblocks_var) {
         std::string stringified_side_block_names = stringify_side_block_names(sblocks);
-         //String size +1 to have space to save '\0' final character.
-        adios_wrapper.DefineVariable<int8_t>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()+1});
+        adios_wrapper.DefineVariable<std::string>(encoded_name);
         //adios_wrapper.DefineVariable<char>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()});
       }
       define_entity_internal(sblocks, role);
@@ -1189,22 +1188,13 @@ namespace Ioad {
           }
           // adios2::Variable<char> sideblock_var =
           //     adios_wrapper.InquireVariable<char>(variable_pair.second.first);
-          adios2::Variable<int8_t> sideblock_var =
-              adios_wrapper.InquireVariable<int8_t>(variable_pair.second.first);
+          adios2::Variable<std::string> sideblock_var =
+              adios_wrapper.InquireVariable<std::string>(variable_pair.second.first);
 
           if (sideblock_var) {
-            // TODO: Remove this hardcoded size and manage variable (delete)
-            BlockInfoType block_infos = get_block_infos<int8_t>(sideblock_var);
-            if(block_infos.Count.size() < 2)  // 2D because first 'D' is rank, and second 'D' is string length
-            {
-              // No sideblock on this process rank.
-              continue;
-            }
-            char* stringified_names = new char[block_infos.Count[1]];
-            get_data<int8_t>(static_cast<void*>(stringified_names), variable_pair.second.first);
-            //get_data<char>(static_cast<void*>(stringified_names), variable_pair.second.first);
+            std::string stringified_names;
+            adios_wrapper.Get<std::string>(sideblock_var, stringified_names, adios2::Mode::Sync);
             std::vector<std::string> block_names = Ioss::tokenize(stringified_names, Sideblock_separator);
-            delete []stringified_names;
             for (std::string block_name : block_names) {
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
                 bool first = true;
