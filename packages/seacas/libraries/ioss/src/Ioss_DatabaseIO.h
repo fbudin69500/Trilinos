@@ -338,9 +338,9 @@ namespace Ioss {
       verify_and_log(reg, field, 1);
       std::cout<<"after first log"<<std::endl;
       int64_t retval = get_field_internal(reg, field, data, data_size);
-      std::cout<<"after get_field"<<std::endl;
+      std::cout<<parallel_rank()<<" after get_field"<<std::endl;
       verify_and_log(nullptr, field, 1);
-      std::cout<<"after second log"<<std::endl;
+      std::cout<<parallel_rank()<<" after second log"<<std::endl;
       return retval;
     }
 

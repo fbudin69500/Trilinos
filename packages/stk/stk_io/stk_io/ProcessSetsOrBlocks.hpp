@@ -76,6 +76,8 @@ void process_node_sharing(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::
   // Register node sharing information for all nodes on processor
   // boundaries.
   //
+        size_t current_node = stk::parallel_machine_rank(bulk.parallel());
+
   stk::ParallelMachine myComm;
   int numProc = -1;
 
@@ -85,25 +87,25 @@ void process_node_sharing(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::
   if (bulk.parallel_size() > 1)
 #else
   myComm = comm;
-  std::cout<<"d1"<<std::endl;
+  std::cout<<current_node<< " - d1"<<std::endl;
   numProc = stk::parallel_machine_size(comm);
-  std::cout<<"d2-"<<numProc<<std::endl;
+  std::cout<<current_node<<" - d2-"<<numProc<<std::endl;
   if (stk::parallel_machine_size(comm) > 1)
 #endif
   {
-    std::cout<<"region in stk:"<<&region<<std::endl;
+    std::cout<<current_node << " - region in stk:"<<&region<<std::endl;
     Ioss::CommSet* io_cs = region.get_commset("commset_node");
-    std::cout<<"d25"<<std::endl;
+    std::cout<<current_node<<" - d25"<<std::endl;
           Ioss::NameList field_names;
-        std::cout<<"io_cs:"<<io_cs<<std::endl;
+        std::cout<<current_node<<" - io_cs:"<<io_cs<<std::endl;
         io_cs->field_describe(&field_names);
-        std::cout<<"after field_describe"<<std::endl;
-        std::cout<<"field name number:" << field_names.size();
+        std::cout<<current_node<<" - after field_describe"<<std::endl;
+        std::cout<<current_node<<" - field name number:" << field_names.size();
       for (auto field_name : field_names) {
-          std::cout<<"field name:"<<field_name<<std::endl;
+          std::cout<<current_node<<" - field name:"<<field_name<<std::endl;
       }
     size_t num_sharings = io_cs->get_field("entity_processor").raw_count();
-std::cout<<"d3:"<<num_sharings<<std::endl;
+std::cout<<current_node<<" - d3:"<<num_sharings<<std::endl;
     // Check for corrupt incomplete nemesis information.  Some old
     // files are being used which do not have the correct nemesis
     // sharing data. They can be identified by an incorrect global
@@ -167,6 +169,7 @@ std::cout<<"d3:"<<num_sharings<<std::endl;
         }
     }
   }
+  std::cout<<current_node<<" - end function"<<std::endl;
 }
 
 
@@ -194,15 +197,19 @@ void process_nodeblocks(Ioss::Region &region, stk::mesh::BulkData &bulk, stk::Pa
   assert(node_blocks.size() == 1);
 
   Ioss::NodeBlock *nb = node_blocks[0];
-std::cout<<"c1"<<std::endl;
+      size_t local_node_count = stk::parallel_machine_rank(bulk.parallel());
+std::cout<<local_node_count<<" - c1"<<std::endl;
 
   std::vector<INT> ids;
+
+
+
   nb->get_field_data("ids", ids);
-std::cout<<"c2"<<std::endl;
+std::cout<<local_node_count<<" - c2"<<std::endl;
 
   stk::mesh::Part& nodePart = bulk.mesh_meta_data().get_cell_topology_root_part(stk::mesh::get_cell_topology(stk::topology::NODE));
   stk::mesh::PartVector nodeParts = {&nodePart};
-std::cout<<"c3:"<<ids.size()<<std::endl;
+std::cout<<local_node_count<<" - c3:"<<ids.size()<<std::endl;
 
   std::vector<stk::mesh::Entity> nodes;
   nodes.reserve(ids.size());
@@ -212,13 +219,14 @@ std::cout<<"c3:"<<ids.size()<<std::endl;
   for (size_t i=0; i < ids.size(); i++) {
     bulk.set_local_id(nodes[i], i);
   }
-std::cout<<"c4"<<std::endl;
+std::cout<<local_node_count << " - c4"<<std::endl;
 
 #ifdef STK_BUILT_IN_SIERRA
   process_node_sharing<INT>(region, bulk);
 #else
+  std::cout<<local_node_count<<" - process_node_sharing"<<std::endl;
   process_node_sharing<INT>(region, bulk, comm);
-  std::cout<<"c5"<<std::endl;
+  std::cout<<local_node_count<<" - c5"<<std::endl;
 
 #endif
 }

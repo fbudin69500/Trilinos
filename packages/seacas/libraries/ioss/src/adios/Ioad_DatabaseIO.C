@@ -121,7 +121,7 @@ namespace Ioad {
     const std::string     Time_scale_factor     = "time_scale_factor";
     const std::string     Time_meta             = "time";
     const std::string     Processor_id_meta     = "processor_id";
-    const std::string     Processor_number_meta = "proignocessor_number";
+    const std::string     Processor_number_meta = "processor_number";
     const std::string     globals_entity_type   = "globals";
     const std::string     globals_entity_name   = "";
     const std::string     region_name           = "no_name";
@@ -175,6 +175,7 @@ namespace Ioad {
 
   bool DatabaseIO::begin__(Ioss::State state)
   {
+    std::cout<<rank<<" begin__"<<std::endl;
     // initialization
     Ioss::Region *    this_region = get_region();
 
@@ -188,6 +189,7 @@ namespace Ioad {
       adios2::StepStatus status = adios_wrapper.BeginStep();
       this_region->property_update("streaming_status", static_cast<int>(status));
     }
+    std::cout<<rank<<" begin__ emd"<<std::endl;
     return true;
   }
 
@@ -333,11 +335,13 @@ namespace Ioad {
     write_meta_data_container<Ioss::CommSetContainer>(comm_sets);
     // Global meta data
     put_data<unsigned long>(static_cast<void*>(&rank), Processor_id_meta);
-    put_data<unsigned long>(static_cast<void*>(&number_proc), Processor_number_meta);
+    //put_data<unsigned long>(static_cast<void*>(&number_proc), Processor_number_meta);
+    //adios_wrapper.PutMetaVariable<unsigned long>(Processor_number_meta, number_proc);
   }
 
   bool DatabaseIO::end__(Ioss::State state)
   {
+    std::cout<<rank<<" end__"<<std::endl;
     // Transitioning out of state 'state'
     assert(state == dbState);
     switch (state) {
@@ -366,12 +370,14 @@ namespace Ioad {
     {
       dbState = Ioss::STATE_UNKNOWN;
     }
+    std::cout<<rank<<" end__ end"<<std::endl;
 
     return true;
   }
 
   bool DatabaseIO::begin_state__(int state, double time)
   {
+    std::cout<<rank<<" degin_state"<<std::endl;
     Ioss::Region *    this_region = get_region();
     if (!is_input()) {
       // `BeginStep()` should not be used at the same time as random access. Since at read time,
@@ -404,12 +410,15 @@ namespace Ioad {
       // Store reduction variables
       // read_reduction_fields();
     }
+        std::cout<<rank<<" degin_state end"<<std::endl;
+
     return true;
   }
 
   // common
   bool DatabaseIO::end_state__(int state, double time)
   {
+    std::cout<<rank<<" end_state__"<<std::endl;
     Ioss::Region *    this_region = get_region();
 
     //if (!is_input()) {
@@ -422,6 +431,7 @@ namespace Ioad {
       this_region->property_update("streaming_status", -1);
 
     //}
+    std::cout<<rank<<" end_state__ end"<<std::endl;
     return true;
   }
 
@@ -700,7 +710,9 @@ namespace Ioad {
     adios_wrapper.DefineAttribute<double>(Time_scale_factor, timeScaleFactor);
     adios_wrapper.DefineMetaVariable<double>(Time_meta);
     adios_wrapper.DefineVariable<unsigned long>(Processor_id_meta, {number_proc}, {rank}, {1});
-    adios_wrapper.DefineVariable<unsigned long>(Processor_number_meta, {number_proc}, {rank}, {1});
+    adios_wrapper.DefineAttribute<unsigned long>(Processor_number_meta, number_proc);
+
+    //adios_wrapper.DefineVariable<unsigned long>(Processor_number_meta, {number_proc}, {rank}, {1});
   }
 
   //------------------------------------------------------------------------
@@ -998,15 +1010,19 @@ namespace Ioad {
     FieldInfoType model_coordinates_infos = get_expected_variable_infos_from_map<double>(
         entity_map, block_type, block_name, coord_var_name);
     spatialDimension = model_coordinates_infos.component_count;
+    // For debug purposes
+    if(!spatialDimension) spatialDimension = 3;
     if (!spatialDimension) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Variable `" << coord_var_name
              << "` in BP file without any dimension information.\n";
       IOSS_ERROR(errmsg);
     }
+    std::cout<<"New block"<<std::endl;
+    std::cout<<"node size:"<<rank<<" "<<model_coordinates_infos.node_boundaries_size<<std::endl;
     auto block = new Ioss::NodeBlock(this, block_name, model_coordinates_infos.node_boundaries_size,
                                      spatialDimension);
-
+    std::cout<<"After New block"<<std::endl;
     Ioss::NameList field_names;
     block->field_describe(&field_names);
     block->property_add(Ioss::Property("id", 1));
@@ -1179,6 +1195,11 @@ namespace Ioad {
           if (sideblock_var) {
             // TODO: Remove this hardcoded size and manage variable (delete)
             BlockInfoType block_infos = get_block_infos<int8_t>(sideblock_var);
+            if(block_infos.Count.size() < 2)  // 2D because first 'D' is rank, and second 'D' is string length
+            {
+              // No sideblock on this process rank.
+              continue;
+            }
             char* stringified_names = new char[block_infos.Count[1]];
             get_data<int8_t>(static_cast<void*>(stringified_names), variable_pair.second.first);
             //get_data<char>(static_cast<void*>(stringified_names), variable_pair.second.first);
@@ -1213,6 +1234,7 @@ namespace Ioad {
                     Ioss::Field field(field_name, block_infos.basic_type, block_infos.variable_type,
                                       block_infos.role, block_infos.node_boundaries_size);
                     sideblock->field_add(field);
+                    // TODO: Check why code is commented out and see if it needs to be removed.
                     //                                  side_block->set_parent_element_block(block);
                   }
                 }
@@ -1370,18 +1392,19 @@ namespace Ioad {
       IOSS_ERROR(errmsg);
     }
     BlockInfoType infos;
+    // For each time step.
     for (auto &blockpair : allblocks) {
       std::vector<typename adios2::Variable<T>::Info> &blocks = blockpair.second;
       // Find in vector if this variable is defined for the current rank process. This means
       // that there is one block for which the rank encoded as the first value in the `Start` array
       // matches the current rank.
+      // Note: one block per rank.
       for (auto &block : blocks) {
         if (block.Start[0] != rank) {
           // This is not the block corresponding to the current process (rank).
           continue;
         }
-        if (blockpair.first == 0) {
-          // infos.node_boundaries_start = block_node_boundaries_start;
+        if (infos.Count.empty()) {
           infos.Count = block.Count;
         }
         else if (infos.Count != block.Count) {
@@ -1419,7 +1442,7 @@ namespace Ioad {
     }
     BlockInfoType block_infos = get_block_infos<T>(var);
     size_t laststep = 0;
-    if(!block_infos.steps.empty()) {
+    if(!block_infos.steps.empty() && !block_infos.Count.empty()) {
       laststep = block_infos.steps.back();
       // Skipping dimension=0 which is equal to the rank. Dimension=1 encodes beginning and count
       // of node count for this variable. Dimension=2 encodes the number of components for this
@@ -1489,10 +1512,6 @@ namespace Ioad {
         IOSS_ERROR(errmsg);
       }
     }
-    // Get Processor information
-    get_data<unsigned long>(static_cast<void*>(&proc_info.processor_id), Processor_id_meta);
-    get_data<unsigned long>(static_cast<void*>(&proc_info.processor_number), Processor_number_meta);
-
     // adios2::Variable<unsigned long> processor_id_var =
     //     adios_wrapper.InquireVariable<unsigned long>(Processor_id_meta);
     // if (processor_id_var) {
@@ -1511,6 +1530,7 @@ namespace Ioad {
 
   void DatabaseIO::read_meta_data__()
   {
+    check_processor_info();
     // Define properties
     if(is_streaming) {
        get_region()->property_update("streaming", 1);
@@ -1564,19 +1584,29 @@ namespace Ioad {
     // read_communication_metadata();
 
     get_globals(globals_map, properties_map);
+    std::cout<<rank<<" before node"<<std::endl;
     get_entities<Ioss::NodeBlock>(fields_map, properties_map);
+    std::cout<<rank<<" after node"<<std::endl;
     get_entities<Ioss::EdgeBlock>(fields_map, properties_map);
+    std::cout<<rank<<" after edgeblock"<<std::endl;
     get_entities<Ioss::FaceBlock>(fields_map, properties_map);
+    std::cout<<rank<<" after faceblok"<<std::endl;
     get_entities<Ioss::ElementBlock>(fields_map, properties_map);
-
+    std::cout<<rank<<" after elementblock"<<std::endl;
     check_side_topology();
-
+std::cout<<rank<<" after topo"<<std::endl;
     get_entities<Ioss::SideSet>(fields_map, properties_map);
+    std::cout<<rank<<" after SideSet"<<std::endl;
     get_entities<Ioss::NodeSet>(fields_map, properties_map);
+    std::cout<<rank<<" after NodeSet"<<std::endl;
     get_entities<Ioss::EdgeSet>(fields_map, properties_map);
+    std::cout<<rank<<" after EdgeSet"<<std::endl;
     get_entities<Ioss::FaceSet>(fields_map, properties_map);
+    std::cout<<rank<<" after FaceSet"<<std::endl;
     get_entities<Ioss::ElementSet>(fields_map, properties_map);
+    std::cout<<rank<<" after ElementSet"<<std::endl;
     get_entities<Ioss::CommSet>(fields_map, properties_map);
+    std::cout<<rank<<" after CommSet"<<std::endl;
 
 // Ioss::Region *    region = get_region();
 //     region->property_add(Ioss::Property("global_node_count", global_nodes));
@@ -1597,6 +1627,42 @@ namespace Ioad {
     // }
   }
 
+
+  void DatabaseIO::check_processor_info()
+  {
+    std::ostringstream errmsg;
+    // Get Processor information
+    std::cout<<"check"<<std::endl;
+    unsigned long number_proc_read = get_attribute<unsigned long>(Processor_number_meta);
+
+    if (number_proc < number_proc_read) {
+        errmsg << "Processor decomposition count in file ("
+               << number_proc_read
+               << ") is larger than current processor count ("
+               << number_proc
+               << "). Configuration not supported.\n";
+        IOSS_ERROR(errmsg);
+        }
+    else if (number_proc > number_proc_read) {
+                IOSS_WARNING << "This file was originally written on "
+                             << number_proc_read
+                             << " processors, but is now being read using "
+                             << number_proc << " processors.\n";
+    }
+    if(rank < number_proc_read) {
+        // Only get info for processors that actually have an id.
+        get_data<unsigned long>(static_cast<void*>(&proc_info.processor_id), Processor_id_meta);
+        if(rank != proc_info.processor_id) {
+            IOSS_WARNING << "This file was originally written on processor " << proc_info.processor_id
+                         << ", but is now being read on processor " << rank
+                         << ". This may cause problems if there is any processor-dependent data on "
+                            "the file.\n";
+        }
+    }
+    // To avoid multiple processes having the same processor_id, we reset the id to the process rank.
+    proc_info.processor_id = rank;
+  }
+
   int64_t DatabaseIO::get_field_internal(const Ioss::Region *reg, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
@@ -1606,51 +1672,70 @@ namespace Ioad {
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal nb"<<std::endl;
     return get_field_internal_t(nb, field, data, data_size);
+    std::cout<<rank<< " get_field_internal nb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal eb"<<std::endl;
     return get_field_internal_t(eb, field, data, data_size);
+    std::cout<<rank<< " get_field_internal eb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal fb"<<std::endl;
     return get_field_internal_t(fb, field, data, data_size);
+    std::cout<<rank<< " get_field_internal fb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal el;"<<std::endl;
     return get_field_internal_t(eb, field, data, data_size);
+    std::cout<<rank<< " get_field_internal el; end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal sb"<<std::endl;
     return get_field_internal_t(sb, field, data, data_size);
+    std::cout<<rank<< " get_field_internal sb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal ns"<<std::endl;
     return get_field_internal_t(ns, field, data, data_size);
+    std::cout<<rank<< " get_field_internal ns end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal es"<<std::endl;
     return get_field_internal_t(es, field, data, data_size);
+    std::cout<<rank<< " get_field_internal es end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal fs"<<std::endl;
     return get_field_internal_t(fs, field, data, data_size);
+    std::cout<<rank<< " get_field_internal fs end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal eset"<<std::endl;
     return get_field_internal_t(es, field, data, data_size);
+    std::cout<<rank<< " get_field_internal eset end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal sides"<<std::endl;
     return get_field_internal_t(ss, field, data, data_size);
 
     // if (res) {
@@ -1676,6 +1761,7 @@ namespace Ioad {
   int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal cs"<<std::endl;
     return get_field_internal_t(cs, field, data, data_size);
   }
 
@@ -1683,7 +1769,9 @@ namespace Ioad {
                                            const Ioss::Field &field, void *data,
                                            size_t data_size) const
   {
+    std::cout<<rank<< " get_field_internal entity"<<std::endl;
     if (!data || !data_size) {
+      std::cout<<rank<< " get_field_internal entity no end |"<<entity->type_string()<<":"<<data << " - "<<data_size<<std::endl;
       return 0;
     }
     int num_to_get = field.verify(data_size);
@@ -1727,12 +1815,14 @@ namespace Ioad {
         IOSS_ERROR(errmsg);
       }
     }
+    std::cout<<rank<< " get_field_internal entity end"<<std::endl;
     return num_to_get;
   }
 
   template <typename T>
   void DatabaseIO::get_data(void *data, const std::string &encoded_name, bool use_step_selection) const
   {
+    std::cout<<rank<< " get_data"<<std::endl;
     adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
@@ -1765,11 +1855,13 @@ namespace Ioad {
         IOSS_WARNING << "WARNING: The variable `" << encoded_name << "` was not found.\n";
       }
     }
+    std::cout<<rank<< " get_data end"<<std::endl;
   }
 
   void DatabaseIO::compute_block_membership__(Ioss::SideBlock *         efblock,
                                               std::vector<std::string> &block_membership) const
   {
+    std::cout<<rank<< " compute_block_membership__ "<<std::endl;
     const Ioss::ElementBlockContainer &element_blocks = get_region()->get_element_blocks();
     assert(Ioss::Utils::check_block_order(element_blocks));
 
@@ -1818,10 +1910,12 @@ namespace Ioad {
         }
       }
     }
+    std::cout<<rank<< " compute_block_membership__ end"<<std::endl;
   }
 
   int DatabaseIO::get_current_state() const
   {
+    std::cout<<rank<< " get_current_state "<<std::endl;
     // value returned is 1-based, whereas ADIOS expect 0-based values
     int step = get_region()->get_current_state() - 1;
 
@@ -1833,6 +1927,8 @@ namespace Ioad {
              << "       [" << get_filename() << "]\n";
       IOSS_ERROR(errmsg);
     }
+        std::cout<<rank<< " get_current_state end"<<std::endl;
+
     return step;
   }
 

@@ -289,6 +289,8 @@ namespace Ioad {
     std::string get_property_variable_name(const std::string &property_name);
     std::vector<std::string> properties_to_save(const Ioss::GroupingEntity *const entity_block);
 
+    void check_processor_info();
+
     int  RankInit();
     bool begin_state__(int state, double time) override;
     bool end_state__(int state, double time) override;
