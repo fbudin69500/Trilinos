@@ -40,7 +40,9 @@
 #include <gen_struc/Iogs_DatabaseIO.h>
 #include <generated/Iogn_DatabaseIO.h>
 #include <heartbeat/Iohb_DatabaseIO.h>
-
+#ifdef HAVE_SEACASIOSS_ADIOS2
+#include <adios/Ioad_Initializer.h>                  // for ADIOS Initializer
+#endif
 #if defined(SEACAS_HAVE_PAMGEN)
 #include <pamgen/Iopg_DatabaseIO.h>
 #endif
@@ -102,6 +104,9 @@ namespace Ioss {
       Ioss::StorageInitializer();
       Ioss::Initializer();
       Iotr::Initializer();
+      #ifdef HAVE_SEACASIOSS_ADIOS2
+      Ioad::Initializer(); // ADIOS2
+      #endif
     }
 
     Initializer::~Initializer()
