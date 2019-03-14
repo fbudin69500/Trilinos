@@ -46,13 +46,11 @@
 #include "Ioss_GroupingEntity.h" // for GroupingEntity
 #include "Ioss_Map.h"            // for Map, MapContainer
 #include "Ioss_NodeBlock.h"      // for NodeBlock
-//#include "Ioss_StructuredBlock.h" // for StructuredBlock
 #include "Ioss_NodeSet.h"         // for NodeSet
 #include "Ioss_Property.h"        // for Property
 #include "Ioss_Region.h"          // for Region, SideSetContainer, etc
 #include "Ioss_SideBlock.h"       // for SideBlock
 #include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
-//#include "Ioss_VariableType.h"    // for VariableType
 #include <Ioss_CodeTypes.h>       // for HAVE_MPI
 #include <Ioss_ElementTopology.h> // for NameList
 #include <Ioss_ParallelUtils.h>   // for ParallelUtils, etc
@@ -69,7 +67,7 @@ namespace Ioss {
   class PropertyManager;
 }
 
-static const char *Version = "2018/06/22";
+static const char *Version = "2019/03/14";
 
 namespace Ioad {
 
@@ -127,7 +125,6 @@ namespace Ioad {
     const std::string     region_name           = "no_name";
     const std::string     original_name         = "original_name";
     constexpr const char *sideblock_names       = "sideblock_names";
-    constexpr size_t      sideblock_names_size  = strlen(sideblock_names);
     const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
         {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
         {"FaceBlock", {"connectivity_edge"}}};
@@ -181,7 +178,6 @@ namespace Ioad {
     //this_region->property_update("streaming_status", -1);
 
     dbState = state;
-    //if (state == Ioss::STATE_MODEL) {
     if (state == Ioss::STATE_DEFINE_MODEL) {
       // Should `BeginStep()` only be if (!is_input() || is_streaming) ???
 
@@ -287,16 +283,11 @@ namespace Ioad {
       std::string stringified_sblock_names;
       adios2::Variable<std::string> sblocks_var =
           adios_wrapper.InquireVariable<std::string>(encoded_name);
-      // adios2::Variable<char> sblocks_var =
-      //     adios_wrapper.InquireVariable<char>(encoded_name);
       if (sblocks_var) {
         std::string stringified_sblock_names = stringify_side_block_names(sblocks);
         adios_wrapper.Put<std::string>(
             sblocks_var, stringified_sblock_names,
             adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-          // adios_wrapper.Put<char>(
-          //   sblocks_var, stringified_sblock_names.c_str(),
-          //   adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
       }
       else {
         std::ostringstream errmsg;
@@ -333,8 +324,6 @@ namespace Ioad {
     write_meta_data_container<Ioss::CommSetContainer>(comm_sets);
     // Global meta data
     put_data<unsigned long>(static_cast<void*>(&rank), Processor_id_meta);
-    //put_data<unsigned long>(static_cast<void*>(&number_proc), Processor_number_meta);
-    //adios_wrapper.PutMetaVariable<unsigned long>(Processor_number_meta, number_proc);
   }
 
   bool DatabaseIO::end__(Ioss::State state)
@@ -685,12 +674,9 @@ namespace Ioad {
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
       adios2::Variable<std::string> sblocks_var =
           adios_wrapper.InquireVariable<std::string>(encoded_name);
-      // adios2::Variable<char> sblocks_var =
-      //     adios_wrapper.InquireVariable<char>(encoded_name);
       if (!sblocks_var) {
         std::string stringified_side_block_names = stringify_side_block_names(sblocks);
         adios_wrapper.DefineVariable<std::string>(encoded_name);
-        //adios_wrapper.DefineVariable<char>(encoded_name, {number_proc, INT_MAX}, {rank, 0}, {1, stringified_side_block_names.size()});
       }
       define_entity_internal(sblocks, role);
     }
@@ -702,8 +688,6 @@ namespace Ioad {
     adios_wrapper.DefineMetaVariable<double>(Time_meta);
     adios_wrapper.DefineVariable<unsigned long>(Processor_id_meta, {number_proc}, {rank}, {1});
     adios_wrapper.DefineAttribute<unsigned long>(Processor_number_meta, number_proc);
-
-    //adios_wrapper.DefineVariable<unsigned long>(Processor_number_meta, {number_proc}, {rank}, {1});
   }
 
   //------------------------------------------------------------------------
@@ -1138,7 +1122,7 @@ namespace Ioad {
       return;
     }
     std::string sideblock_type = get_entity_type<Ioss::SideBlock>();
-    // Do SideBlock exist in the fields_map. This will be used when loading the SideBlock
+    // Do SideBlocks exist in the fields_map. This will be used when loading the SideBlock
     // for each SideSet, but we check this here outside of a loop as it only needs to be done once.
     bool no_sideblocks = (fields_map.find(sideblock_type) == fields_map.end());
 
@@ -1175,8 +1159,6 @@ namespace Ioad {
           if (no_sideblocks) {
             continue;
           }
-          // adios2::Variable<char> sideblock_var =
-          //     adios_wrapper.InquireVariable<char>(variable_pair.second.first);
           adios2::Variable<std::string> sideblock_var =
               adios_wrapper.InquireVariable<std::string>(variable_pair.second.first);
 
@@ -1491,18 +1473,6 @@ namespace Ioad {
         IOSS_ERROR(errmsg);
       }
     }
-    // adios2::Variable<unsigned long> processor_id_var =
-    //     adios_wrapper.InquireVariable<unsigned long>(Processor_id_meta);
-    // if (processor_id_var) {
-    //   processor_id_var.SetSelection(adios2::Box<adios2::Dims>({rank}, {1}));
-    //   adios_wrapper.Get<unsigned long>(processor_id_var, proc_info.processor_id,
-    //                        adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    // }
-    // else {
-    //     std::ostringstream errmsg;
-    //     errmsg << "ERROR: Required `"<< Processor_id_meta <<"` variable not found in file.\n";
-    //     IOSS_ERROR(errmsg);
-    // }
     // Add region properties
     add_entity_properties(this_region, properties_map, region_name);
   }
