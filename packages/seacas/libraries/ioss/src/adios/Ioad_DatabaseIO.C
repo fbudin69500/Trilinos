@@ -175,7 +175,6 @@ namespace Ioad {
 
   bool DatabaseIO::begin__(Ioss::State state)
   {
-    std::cout<<rank<<" begin__"<<std::endl;
     // initialization
     Ioss::Region *    this_region = get_region();
 
@@ -189,7 +188,6 @@ namespace Ioad {
       adios2::StepStatus status = adios_wrapper.BeginStep();
       this_region->property_update("streaming_status", static_cast<int>(status));
     }
-    std::cout<<rank<<" begin__ emd"<<std::endl;
     return true;
   }
 
@@ -341,7 +339,6 @@ namespace Ioad {
 
   bool DatabaseIO::end__(Ioss::State state)
   {
-    std::cout<<rank<<" end__"<<std::endl;
     // Transitioning out of state 'state'
     assert(state == dbState);
     switch (state) {
@@ -370,14 +367,12 @@ namespace Ioad {
     {
       dbState = Ioss::STATE_UNKNOWN;
     }
-    std::cout<<rank<<" end__ end"<<std::endl;
 
     return true;
   }
 
   bool DatabaseIO::begin_state__(int state, double time)
   {
-    std::cout<<rank<<" degin_state"<<std::endl;
     Ioss::Region *    this_region = get_region();
     if (!is_input()) {
       // `BeginStep()` should not be used at the same time as random access. Since at read time,
@@ -410,7 +405,6 @@ namespace Ioad {
       // Store reduction variables
       // read_reduction_fields();
     }
-        std::cout<<rank<<" degin_state end"<<std::endl;
 
     return true;
   }
@@ -418,7 +412,6 @@ namespace Ioad {
   // common
   bool DatabaseIO::end_state__(int state, double time)
   {
-    std::cout<<rank<<" end_state__"<<std::endl;
     Ioss::Region *    this_region = get_region();
 
     //if (!is_input()) {
@@ -431,7 +424,6 @@ namespace Ioad {
       this_region->property_update("streaming_status", -1);
 
     //}
-    std::cout<<rank<<" end_state__ end"<<std::endl;
     return true;
   }
 
@@ -1017,11 +1009,8 @@ namespace Ioad {
              << "` in BP file without any dimension information.\n";
       IOSS_ERROR(errmsg);
     }
-    std::cout<<"New block"<<std::endl;
-    std::cout<<"node size:"<<rank<<" "<<model_coordinates_infos.node_boundaries_size<<std::endl;
     auto block = new Ioss::NodeBlock(this, block_name, model_coordinates_infos.node_boundaries_size,
                                      spatialDimension);
-    std::cout<<"After New block"<<std::endl;
     Ioss::NameList field_names;
     block->field_describe(&field_names);
     block->property_add(Ioss::Property("id", 1));
@@ -1574,29 +1563,17 @@ namespace Ioad {
     // read_communication_metadata();
 
     get_globals(globals_map, properties_map);
-    std::cout<<rank<<" before node"<<std::endl;
     get_entities<Ioss::NodeBlock>(fields_map, properties_map);
-    std::cout<<rank<<" after node"<<std::endl;
     get_entities<Ioss::EdgeBlock>(fields_map, properties_map);
-    std::cout<<rank<<" after edgeblock"<<std::endl;
     get_entities<Ioss::FaceBlock>(fields_map, properties_map);
-    std::cout<<rank<<" after faceblok"<<std::endl;
     get_entities<Ioss::ElementBlock>(fields_map, properties_map);
-    std::cout<<rank<<" after elementblock"<<std::endl;
     check_side_topology();
-std::cout<<rank<<" after topo"<<std::endl;
     get_entities<Ioss::SideSet>(fields_map, properties_map);
-    std::cout<<rank<<" after SideSet"<<std::endl;
     get_entities<Ioss::NodeSet>(fields_map, properties_map);
-    std::cout<<rank<<" after NodeSet"<<std::endl;
     get_entities<Ioss::EdgeSet>(fields_map, properties_map);
-    std::cout<<rank<<" after EdgeSet"<<std::endl;
     get_entities<Ioss::FaceSet>(fields_map, properties_map);
-    std::cout<<rank<<" after FaceSet"<<std::endl;
     get_entities<Ioss::ElementSet>(fields_map, properties_map);
-    std::cout<<rank<<" after ElementSet"<<std::endl;
     get_entities<Ioss::CommSet>(fields_map, properties_map);
-    std::cout<<rank<<" after CommSet"<<std::endl;
 
 // Ioss::Region *    region = get_region();
 //     region->property_add(Ioss::Property("global_node_count", global_nodes));
@@ -1622,7 +1599,6 @@ std::cout<<rank<<" after topo"<<std::endl;
   {
     std::ostringstream errmsg;
     // Get Processor information
-    std::cout<<"check"<<std::endl;
     unsigned long number_proc_read = get_attribute<unsigned long>(Processor_number_meta);
 
     if (number_proc < number_proc_read) {
@@ -1662,70 +1638,51 @@ std::cout<<rank<<" after topo"<<std::endl;
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal nb"<<std::endl;
     return get_field_internal_t(nb, field, data, data_size);
-    std::cout<<rank<< " get_field_internal nb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal eb"<<std::endl;
     return get_field_internal_t(eb, field, data, data_size);
-    std::cout<<rank<< " get_field_internal eb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal fb"<<std::endl;
     return get_field_internal_t(fb, field, data, data_size);
-    std::cout<<rank<< " get_field_internal fb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal el;"<<std::endl;
     return get_field_internal_t(eb, field, data, data_size);
-    std::cout<<rank<< " get_field_internal el; end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal sb"<<std::endl;
     return get_field_internal_t(sb, field, data, data_size);
-    std::cout<<rank<< " get_field_internal sb end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal ns"<<std::endl;
     return get_field_internal_t(ns, field, data, data_size);
-    std::cout<<rank<< " get_field_internal ns end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal es"<<std::endl;
     return get_field_internal_t(es, field, data, data_size);
-    std::cout<<rank<< " get_field_internal es end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal fs"<<std::endl;
     return get_field_internal_t(fs, field, data, data_size);
-    std::cout<<rank<< " get_field_internal fs end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal eset"<<std::endl;
     return get_field_internal_t(es, field, data, data_size);
-    std::cout<<rank<< " get_field_internal eset end"<<std::endl;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal sides"<<std::endl;
     return get_field_internal_t(ss, field, data, data_size);
 
     // if (res) {
@@ -1751,7 +1708,6 @@ std::cout<<rank<<" after topo"<<std::endl;
   int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal cs"<<std::endl;
     return get_field_internal_t(cs, field, data, data_size);
   }
 
@@ -1759,9 +1715,7 @@ std::cout<<rank<<" after topo"<<std::endl;
                                            const Ioss::Field &field, void *data,
                                            size_t data_size) const
   {
-    std::cout<<rank<< " get_field_internal entity"<<std::endl;
     if (!data || !data_size) {
-      std::cout<<rank<< " get_field_internal entity no end |"<<entity->type_string()<<":"<<data << " - "<<data_size<<std::endl;
       return 0;
     }
     int num_to_get = field.verify(data_size);
@@ -1774,6 +1728,10 @@ std::cout<<rank<<" after topo"<<std::endl;
                                           ? entity->get_property(original_name).get_string()
                                           : entity->name();
       const std::string &field_name = field.get_name();
+
+      if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
+        return num_to_get;
+      }
 
       std::string encoded_name = encode_field_name({entity_type, entity_name, field_name});
       bool use_step_selection = false;
@@ -1805,14 +1763,12 @@ std::cout<<rank<<" after topo"<<std::endl;
         IOSS_ERROR(errmsg);
       }
     }
-    std::cout<<rank<< " get_field_internal entity end"<<std::endl;
     return num_to_get;
   }
 
   template <typename T>
   void DatabaseIO::get_data(void *data, const std::string &encoded_name, bool use_step_selection) const
   {
-    std::cout<<rank<< " get_data"<<std::endl;
     adios2::Variable<T> entities   = adios_wrapper.InquireVariable<T>(encoded_name);
     if (entities) {
       T *rdata = static_cast<T *>(data);
@@ -1845,13 +1801,11 @@ std::cout<<rank<<" after topo"<<std::endl;
         IOSS_WARNING << "WARNING: The variable `" << encoded_name << "` was not found.\n";
       }
     }
-    std::cout<<rank<< " get_data end"<<std::endl;
   }
 
   void DatabaseIO::compute_block_membership__(Ioss::SideBlock *         efblock,
                                               std::vector<std::string> &block_membership) const
   {
-    std::cout<<rank<< " compute_block_membership__ "<<std::endl;
     const Ioss::ElementBlockContainer &element_blocks = get_region()->get_element_blocks();
     assert(Ioss::Utils::check_block_order(element_blocks));
 
@@ -1900,12 +1854,10 @@ std::cout<<rank<<" after topo"<<std::endl;
         }
       }
     }
-    std::cout<<rank<< " compute_block_membership__ end"<<std::endl;
   }
 
   int DatabaseIO::get_current_state() const
   {
-    std::cout<<rank<< " get_current_state "<<std::endl;
     // value returned is 1-based, whereas ADIOS expect 0-based values
     int step = get_region()->get_current_state() - 1;
 
@@ -1917,8 +1869,6 @@ std::cout<<rank<<" after topo"<<std::endl;
              << "       [" << get_filename() << "]\n";
       IOSS_ERROR(errmsg);
     }
-        std::cout<<rank<< " get_current_state end"<<std::endl;
-
     return step;
   }
 
