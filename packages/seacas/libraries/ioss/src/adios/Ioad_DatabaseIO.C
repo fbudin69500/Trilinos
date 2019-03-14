@@ -705,9 +705,8 @@ namespace Ioad {
     }
   }
 
-  // TODO: write actual code!
   // Returns byte size of integers stored on the database...
-  int DatabaseIO::int_byte_size_db() const { return 4; }
+  int DatabaseIO::int_byte_size_db() const { return 8; }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
@@ -1784,15 +1783,7 @@ namespace Ioad {
     }
     else {
       Ioss::Int64Vector element_side;
-      if (int_byte_size_api() == 4) {
-        Ioss::IntVector es32;
-        efblock->get_field_data("element_side", es32);
-        element_side.resize(es32.size());
-        std::copy(es32.begin(), es32.end(), element_side.begin());
-      }
-      else {
-        efblock->get_field_data("element_side", element_side);
-      }
+      efblock->get_field_data("element_side", element_side);
 
       size_t              number_sides = element_side.size() / 2;
       Ioss::ElementBlock *block        = nullptr;
