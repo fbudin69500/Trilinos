@@ -46,8 +46,6 @@ namespace Ioad {
     else {
       m_IsStreaming = true;
     }
-    std::cout<<"engine:"<<engine<<std::endl;
-    std::cout<<"streaming:"<<m_IsStreaming<<std::endl;
     // Set transport based on properties
     if (properties.exists("Transport")) {
       transport = properties.get("Transport").get_string();
@@ -100,7 +98,6 @@ namespace Ioad {
   {
     if (!m_OpenStep) {
       adios2::StepStatus status = this->Engine::BeginStep();
-      std::cout<<"begin call:"<< count_real_begin ++ << std::endl;
       if (status == adios2::StepStatus::OK) {
         m_OpenStep = true;
       }

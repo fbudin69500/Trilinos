@@ -184,7 +184,6 @@ namespace {
         #endif
         // TODO: in Streaming, we shouldn't have to specify the step we are getting. It is just the next step.
         double time = io_region->get_state_time(step);
-          std::cout << step << " " << time << std::endl;
         if (step == timestep_count)
           interpolation_intervals = 1;
         
@@ -361,14 +360,11 @@ int main(int argc, char** argv)
     #endif
     ("interpolate", bopt::value<int>(&interpolation_intervals), "number of intervals to divide each input time step into")
     ("integer_size", bopt::value<int>(&integer_size), "use 4 or 8-byte integers for input and output" );
-std::cout<<"plop"<<std::endl;
 
   stk::parallel_machine_init(&argc, &argv);
-std::cout<<"plop2"<<std::endl;
   bopt::variables_map vm;
   bopt::store(bopt::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
   bopt::notify(vm);
-std::cout<<"plop3"<<std::endl;
   if (mesh.empty()) {
     std::cerr << "\nERROR: The --mesh option is required\n";
     std::cerr << "\nApplication " << desc << "\n";
@@ -414,7 +410,6 @@ std::cout<<"plop3"<<std::endl;
     hb_type = stk::io::TS_TEXT;
   else if (heartbeat_format == "spyhis")
     hb_type = stk::io::SPYHIS;
-    std::cout<<"plop3.5"<<std::endl;
   driver(parallel_io,
 	 working_directory, mesh, type, type_out, decomp_method, compose_output,
 	 compression_level, compression_shuffle, lc_names, integer_size, hb_type,
@@ -423,7 +418,6 @@ std::cout<<"plop3"<<std::endl;
    , engine_in, engine_out
    #endif
    );
-std::cout<<"plop4"<<std::endl;
   stk::parallel_machine_finalize();
   return 0;
 }

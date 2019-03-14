@@ -154,7 +154,6 @@ namespace Ioad {
     dbState = Ioss::STATE_UNKNOWN;
     // Always 64 bits
     dbIntSizeAPI = Ioss::USE_INT64_API;
-    set_logging(false);
     // Streaming initialization
     is_streaming = adios_wrapper.IsStreaming();
     previous_time_streaming = -1.0;
