@@ -170,7 +170,7 @@ namespace {
       for (int step = 1; step <= timestep_count; step++) {
         #ifdef HAVE_SEACASIOSS_ADIOS2
         if (is_streaming) {
-          timestep_count == step;
+          timestep_count = step;
 
           int status = io_region->get_property("streaming_status").get_int();
           if (status != 0) {
@@ -314,8 +314,6 @@ namespace bopt = boost::program_options;
 
 int main(int argc, char** argv)
 {
-  //int a;
-  //std::cin>>a;
   std::string working_directory = "";
   std::string decomp_method = "";
   std::string mesh = "";

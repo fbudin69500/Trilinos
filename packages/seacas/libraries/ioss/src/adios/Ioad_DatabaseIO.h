@@ -264,12 +264,12 @@ namespace Ioad {
 
     template <typename T>
     using IossHas3ParametersConstructor =
-        decltype(DerivedFromIossGroupingEntity<T>{}, T((DatabaseIO *){}, std::string{}, int64_t{}));
+        decltype(DerivedFromIossGroupingEntity<T>{}, T(nullptr, std::string{}, int64_t{}));
 
     template <typename T>
     using IossHas4ParametersConstructor =
         decltype(DerivedFromIossGroupingEntity<T>{},
-                 T((DatabaseIO *){}, std::string{}, std::string{}, int64_t{}));
+                 T(nullptr, std::string{}, std::string{}, int64_t{}));
 
     template <typename T>
     auto NewEntity(DatabaseIO *io_database, const std::string &my_name,

@@ -67,8 +67,6 @@ namespace Ioss {
   class PropertyManager;
 }
 
-static const char *Version = "2019/03/14";
-
 namespace Ioad {
 
   namespace {
@@ -279,7 +277,6 @@ namespace Ioad {
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
       std::string encoded_name = encode_sideblock_name(entity_type, entity_name);
 
-      std::string stringified_sblock_names;
       adios2::Variable<std::string> sblocks_var =
           adios_wrapper.InquireVariable<std::string>(encoded_name);
       if (sblocks_var) {
@@ -698,7 +695,6 @@ namespace Ioad {
     {
       Ioss::SerializeIO serializeIO__(this);
 
-      Ioss::Field::RoleType role       = field.get_role();
       int                   num_to_get = field.verify(data_size);
       throw "Not impleemented";
       return num_to_get;
@@ -1801,9 +1797,9 @@ namespace Ioad {
     }
 
     // Synchronize among all processors....
-    // if (isParallel) {
-    //   util().global_array_minmax(block_ids, Ioss::ParallelUtils::DO_MAX);
-    // }
+    if (isParallel) {
+      util().global_array_minmax(block_ids, Ioss::ParallelUtils::DO_MAX);
+    }
 
     for (const auto block : element_blocks) {
       size_t block_order = block->get_property("original_block_order").get_int();
