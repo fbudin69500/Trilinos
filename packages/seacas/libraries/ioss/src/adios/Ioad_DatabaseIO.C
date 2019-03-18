@@ -1581,16 +1581,15 @@ namespace Ioad {
     }
     if(rank < number_proc_read) {
         // Only get info for processors that actually have an id.
-        get_data<unsigned long>(static_cast<void*>(&proc_info.processor_id), Processor_id_meta);
-        if(rank != proc_info.processor_id) {
-            IOSS_WARNING << "This file was originally written on processor " << proc_info.processor_id
+        unsigned long processor_id;
+        get_data<unsigned long>(static_cast<void*>(&processor_id), Processor_id_meta);
+        if(rank != processor_id) {
+            IOSS_WARNING << "This file was originally written on processor " << processor_id
                          << ", but is now being read on processor " << rank
                          << ". This may cause problems if there is any processor-dependent data on "
                             "the file.\n";
         }
     }
-    // To avoid multiple processes having the same processor_id, we reset the id to the process rank.
-    proc_info.processor_id = rank;
   }
 
   int64_t DatabaseIO::get_field_internal(const Ioss::Region *reg, const Ioss::Field &field,

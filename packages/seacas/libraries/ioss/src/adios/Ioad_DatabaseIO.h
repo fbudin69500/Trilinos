@@ -189,11 +189,6 @@ namespace Ioad {
       std::string            parent_topology;
     };
 
-    struct ProcessorInfo
-    {
-      unsigned long processor_id = -1;
-      unsigned long processor_number = -1;
-    };
     template<typename T>
     BlockInfoType get_block_infos(const adios2::Variable<T> &var) const;
 
@@ -304,8 +299,6 @@ namespace Ioad {
     unsigned long number_proc;
     bool is_streaming;
     double previous_time_streaming;
-
-    ProcessorInfo proc_info;
   };
 } // namespace Ioad
 #endif
