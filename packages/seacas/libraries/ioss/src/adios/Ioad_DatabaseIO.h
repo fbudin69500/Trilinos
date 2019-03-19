@@ -69,7 +69,7 @@ namespace Ioad {
     bool begin__(Ioss::State state) override;
     bool end__(Ioss::State state) override;
 
-    unsigned int entity_field_support() const override { return 0; }
+    unsigned entity_field_support() const override;
     int          int_byte_size_db() const override;
 
   private:

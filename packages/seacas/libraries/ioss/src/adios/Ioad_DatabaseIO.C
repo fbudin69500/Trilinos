@@ -564,6 +564,13 @@ namespace Ioad {
   // Returns byte size of integers stored on the database...
   int DatabaseIO::int_byte_size_db() const { return 8; }
 
+  unsigned DatabaseIO::entity_field_support() const
+  {
+    return Ioss::NODEBLOCK | Ioss::EDGEBLOCK | Ioss::FACEBLOCK | Ioss::ELEMENTBLOCK |
+           Ioss::NODESET | Ioss::EDGESET | Ioss::FACESET | Ioss::ELEMENTSET | Ioss::SIDESET |
+           Ioss::SIDEBLOCK;
+  }
+
   int64_t DatabaseIO::put_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
