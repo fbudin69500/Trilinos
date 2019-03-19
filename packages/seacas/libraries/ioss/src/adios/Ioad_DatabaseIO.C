@@ -43,7 +43,6 @@
 #include "Ioss_FaceBlock.h"      // for FaceBlock
 #include "Ioss_FaceSet.h"        // for FaceSet
 #include "Ioss_FileInfo.h"       // for FileInfo
-#include "Ioss_GroupingEntity.h" // for GroupingEntity
 #include "Ioss_Map.h"            // for Map, MapContainer
 #include "Ioss_NodeBlock.h"      // for NodeBlock
 #include "Ioss_NodeSet.h"         // for NodeSet
@@ -57,6 +56,10 @@
 #include <Ioss_SerializeIO.h>     // for SerializeIO
 #include <Ioss_Utils.h>           // for Utils, IOSS_ERROR, etc
 
+#include "adios/Ioad_TemplateToValue.h"
+#include "adios/Ioad_Helper.h"
+#include "adios/Ioad_Constants.h"
+
 #include <climits>
 
 #include "adios2/helper/adiosFunctions.h"
@@ -68,80 +71,6 @@ namespace Ioss {
 }
 
 namespace Ioad {
-
-  namespace {
-    template <typename T> Ioss::Field::BasicType template_to_basic_type()
-    {
-      return Ioss::Field::BasicType::INVALID;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<double>()
-    {
-      return Ioss::Field::BasicType::DOUBLE;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<int32_t>()
-    {
-      return Ioss::Field::BasicType::INT32;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<int64_t>()
-    {
-      return Ioss::Field::BasicType::INT64;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<Complex>()
-    {
-      return Ioss::Field::BasicType::COMPLEX;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<std::string>()
-    {
-      return Ioss::Field::BasicType::STRING;
-    }
-
-    template <> Ioss::Field::BasicType template_to_basic_type<char>()
-    {
-      return Ioss::Field::BasicType::CHARACTER;
-    }
-
-    // Constant variables
-    const std::string     Schema_version_string = "IOSS_adios_version";
-    const std::string     Sideblock_separator   = "::";
-    const std::string     Name_separator        = "/";
-    const std::string     Role_meta             = "role";
-    const std::string     Var_type_meta         = "var_type";
-    const std::string     Topology_meta         = "topology";
-    const std::string     property_meta         = "property_";
-    const std::string     Parent_topology_meta  = "parent_topology";
-    const std::string     Time_scale_factor     = "time_scale_factor";
-    const std::string     Time_meta             = "time";
-    const std::string     Processor_id_meta     = "processor_id";
-    const std::string     Processor_number_meta = "processor_number";
-    const std::string     globals_entity_type   = "globals";
-    const std::string     globals_entity_name   = "";
-    const std::string     region_name           = "no_name";
-    const std::string     original_name         = "original_name";
-    constexpr const char *sideblock_names       = "sideblock_names";
-    const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
-        {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
-        {"FaceBlock", {"connectivity_edge"}}};
-    const std::map<std::string, std::set<std::string>> Ignore_fields = {
-        {"NodeBlock",
-         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
-        {"ElementBlock", {"implicit_ids"}},
-        {"FaceBlock", {"connectivity_raw"}},
-        {"EdgeBlock", {"connectivity_raw"}},
-        {"CommSet", {"ids"}},
-        {"SideSet", {"ids"}},
-        {"SideBlock", {"side_ids", "ids", "connectivity", "connectivity_raw"}}};
-    const std::vector<std::string> Ignore_properties = {{
-        "name",  // Name is already known as it is how it is encoded in the output file.
-        "_base_stk_part_name", "db_name",  // Not necessary
-        "streaming_status", "streaming",  // Properties added during processing. Should not be saved.
-        "entity_count"  // Set in GroupingEntity constructor and can be different accross mpi processes.
-        }};
-  } // namespace
 
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
                          Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
@@ -184,10 +113,7 @@ namespace Ioad {
     return true;
   }
 
-  std::string DatabaseIO::get_property_variable_name(const std::string &property_name)
-  {
-    return property_meta + property_name;
-  }
+
 
   void DatabaseIO::write_properties(const Ioss::GroupingEntity * const entity, const std::string & encoded_name)
   {
@@ -256,14 +182,6 @@ namespace Ioad {
     }
   }
 
-  std::string DatabaseIO::stringify_side_block_names(const Ioss::SideBlockContainer &sblocks) const
-  {
-    std::string stringified_sblock_names;
-    for (auto sblock : sblocks) {
-      stringified_sblock_names += Sideblock_separator + sblock->name();
-    }
-    return stringified_sblock_names;
-  }
 
   template <>
   void DatabaseIO::write_meta_data_container<Ioss::SideSetContainer>(const Ioss::SideSetContainer &ssets)
@@ -412,16 +330,6 @@ namespace Ioad {
     return true;
   }
 
-  bool DatabaseIO::use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
-                                           const std::string &field_name) const
-  {
-    if (field.get_role() == Ioss::Field::RoleType::TRANSIENT ||
-        find_field_in_mapset(entity_type, field_name, Use_transformed_storage_map)) {
-      return true;
-    }
-    return false;
-  }
-
   void DatabaseIO::define_field_meta_variables(const std::string &encoded_name)
   {
     adios_wrapper.DefineMetaVariable<int>(Role_meta, encoded_name);
@@ -467,43 +375,8 @@ namespace Ioad {
                                     {rank, 0, 0}, {1, local_size, component_count});
   }
 
-  std::string DatabaseIO::encode_field_name(std::vector<std::string> names) const
-  {
-    std::string encoded_name;
-    size_t      count = 0;
-    for (std::vector<std::string>::iterator it = names.begin(); it != names.end() - 1;
-         it++, count++) {
-      encoded_name += *it + Name_separator;
-    }
-    // sentinel value to avoid having to test if the string is empty or not.
-    names.push_back("");
-    return encoded_name + names[count];
-  }
 
-  std::vector<std::string>
-  DatabaseIO::properties_to_save(const Ioss::GroupingEntity *const entity_block)
-  {
-    std::vector<std::string> property_list;
-    entity_block->property_describe(&property_list);
 
-    for (auto ignore_property : Ignore_properties) {
-      property_list.erase(std::remove(property_list.begin(), property_list.end(), ignore_property),
-                          property_list.end());
-    }
-    property_list.erase(std::remove_if(property_list.begin(), property_list.end(),
-                                       [&](std::string property_name) -> bool {
-                                         Ioss::Property property =
-                                             entity_block->get_property(property_name);
-                                         if (property.is_invalid() || property.is_implicit()) {
-                                           return true;
-                                         }
-                                         else {
-                                           return false;
-                                         }
-                                       }),
-                        property_list.end());
-    return property_list;
-  }
 
   void DatabaseIO::define_properties(const Ioss::GroupingEntity *const entity_block,
                                      const std::string &               encoded_entity_name)
@@ -599,19 +472,6 @@ namespace Ioad {
     }
   }
 
-  std::string DatabaseIO::encode_sideblock_name(std::string type_string, std::string name) const
-  {
-    return encode_field_name({type_string, name, sideblock_names});
-  }
-
-  bool DatabaseIO::is_sideblock_name(std::string name) const
-  {
-    size_t pos = name.find(sideblock_names);
-    if (pos == 0) {
-      return true;
-    }
-    return false;
-  }
 
   // Similar to `write_meta_data()` function in other DatabaseIO. This function has been renamed in
   // this database to reflect more precisely what it accomplishes.
@@ -708,21 +568,6 @@ namespace Ioad {
                                          void *data, size_t data_size) const
   {
     return put_field_internal_t(nb, field, data, data_size);
-  }
-
-  int DatabaseIO::find_field_in_mapset(
-      const std::string &entity_type, const std::string &field_name,
-      const std::map<std::string, std::set<std::string>> &mapset) const
-  {
-    if (mapset.find(entity_type) == mapset.end()) {
-      // No field for this entity_type in the map.
-      return 0;
-    }
-    const std::set<std::string> &entity_set = mapset.at(entity_type);
-    if (entity_set.find(field_name) != entity_set.end()) {
-      return 1;
-    }
-    return 0;
   }
 
   template <typename T>
@@ -866,36 +711,6 @@ namespace Ioad {
   {
     // TODO: Make sure that Commset should be handled like a "set" and not like a "block".
     return put_field_internal_t(cs, field, data, data_size);
-  }
-
-  template <typename T> const std::string DatabaseIO::get_entity_type()
-  {
-    // Use "node" as default entity type to enable factory to create object.
-    std::unique_ptr<T> entity(NewEntity<T>(this, "", "node", 0));
-    return entity->type_string();
-  }
-
-  // NodeBlock has a different constructor...
-  template <> const std::string DatabaseIO::get_entity_type<Ioss::NodeBlock>()
-  {
-    Ioss::NodeBlock nodeblock(this, "", 0, 1);
-    return nodeblock.type_string();
-  }
-
-  // SideSet has a different constructor...
-  template <> const std::string DatabaseIO::get_entity_type<Ioss::SideSet>()
-  {
-    Ioss::SideSet sideset(this, "");
-    return sideset.type_string();
-  }
-
-  // SideBlock has a different constructor...
-  template <> const std::string DatabaseIO::get_entity_type<Ioss::SideBlock>()
-  {
-    // default element arbitrarily set to "hex8": We need an element type
-    // to be able to construct this sideblock.
-    Ioss::SideBlock sideblock(this, "", "node", "hex8", 0);
-    return sideblock.type_string();
   }
 
   template <typename T>
@@ -1206,26 +1021,7 @@ namespace Ioad {
     }
   }
 
-  // Takes an extra unused parameter "entity_type" to match the API of the function
-  // "NewEntity" used for objects that are not EntitySets which require that parameter.
-  // Having matching APIs allows to call this function from generic templated functions
-  // that do not have to be specialized to call this function with a different number of
-  // parameters.
-  template <typename T>
-  auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                             const std::string & /*entity_type*/, size_t entity_count)
-      -> IossHas3ParametersConstructor<T> *
-  {
-    return new T(io_database, my_name, entity_count);
-  }
 
-  template <typename T>
-  auto DatabaseIO::NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                             const std::string &entity_type, size_t entity_count)
-      -> IossHas4ParametersConstructor<T> *
-  {
-    return new T(io_database, my_name, entity_type, entity_count);
-  }
 
   template <typename T>
   void DatabaseIO::get_entities(const FieldsMapType &fields_map,

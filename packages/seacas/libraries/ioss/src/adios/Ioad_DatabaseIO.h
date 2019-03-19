@@ -38,11 +38,8 @@
 #include <Ioss_DatabaseIO.h>
 #include "Ioss_EntitySet.h"
 
-#include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
-
 #include "Ioss_Field.h" // for Field, etc
 #include <AdiosWrapper.h>
-#include <set>
 
 namespace Ioss {
   class GroupingEntity;
@@ -72,8 +69,8 @@ namespace Ioad {
     bool begin__(Ioss::State state) override;
     bool end__(Ioss::State state) override;
 
-    unsigned int entity_field_support() const { return 0; }
-    int          int_byte_size_db() const;
+    unsigned int entity_field_support() const override { return 0; }
+    int          int_byte_size_db() const override;
 
   private:
     int64_t get_field_internal(const Ioss::Region *reg, const Ioss::Field &field, void *data,
@@ -150,9 +147,8 @@ namespace Ioad {
     template<typename T>  T get_attribute(const std::string &attribute_name);
     // void read_region(adios2::IO & bpio);
 
-    int64_t element_global_to_local__(int64_t global) const { return 0; }
-    int64_t node_global_to_local__(int64_t global, bool must_exist) const { return 0; }
-
+    int64_t element_global_to_local__(int64_t global) = delete;
+    int64_t node_global_to_local__(int64_t global, bool must_exist)  = delete;
     template <typename T>
     void put_data(void *data, const std::string &encoded_name) const;
     template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
@@ -163,9 +159,6 @@ namespace Ioad {
                                const std::string &entity_type, const std::string &field_name);
     template <typename T>
     void define_entity_internal(const T &entity_blocks, Ioss::Field::RoleType *role);
-
-    bool use_transformed_storage(const Ioss::Field &field, const std::string &entity_type,
-                                 const std::string &field_name) const;
 
     int get_current_state() const;
 
@@ -198,7 +191,10 @@ namespace Ioad {
     using FieldsMapType = std::map<std::string, EntityMapType>;
 
     template<typename T>
-    std::string get_property_value(const FieldsMapType & properties_map, const std::string &entity_type, const std::string &entity_name, const std::string &property_name) const;
+    std::string get_property_value(const FieldsMapType & properties_map,
+                                   const std::string &entity_type,
+                                   const std::string &entity_name,
+                                   const std::string &property_name) const;
 
     template <typename T>
     FieldInfoType get_expected_variable_infos_from_map(const EntityMapType &fields_map,
@@ -210,9 +206,6 @@ namespace Ioad {
                                               const std::string &  entity_name,
                                               const std::string &  var_name) const;
 
-    std::string encode_field_name(std::vector<std::string> names) const;
-    std::string encode_sideblock_name(std::string type_string, std::string name) const;
-    bool        is_sideblock_name(std::string name) const;
 
     template <typename T>
     using IsIossEntityBlock =
@@ -220,10 +213,6 @@ namespace Ioad {
     template <typename T>
     using IsNotIossEntityBlock =
         typename std::enable_if<!std::is_base_of<Ioss::EntityBlock, T>::value>::type;
-    template <typename T>
-    using CompareEntityBlock =
-        typename std::conditional<std::is_base_of<Ioss::EntityBlock, T>::value, Ioss::EntityBlock,
-                                  Ioss::GroupingEntity>::type;
 
     template <typename T, typename = IsIossEntityBlock<T>>
     void define_entity_meta_variables(const std::string &encoded_name);
@@ -244,54 +233,23 @@ namespace Ioad {
 
     void write_properties(const Ioss::GroupingEntity * const entity, const std::string & encoded_name);
 
-    std::string stringify_side_block_names(const Ioss::SideBlockContainer &sblocks) const;
-
     template <typename T> void write_meta_data_container(const T &entity_blocks);
 
-    template <typename T> const std::string get_entity_type();
     template <typename T> void              get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map);
     std::string get_optional_string_variable(const std::string &field_name,
                                              const std::string &string_variable) const;
-
-    template <typename T>
-    using DerivedFromIossGroupingEntity =
-        typename std::enable_if<std::is_base_of<Ioss::GroupingEntity, T>::value, bool>::type;
-
-    template <typename T>
-    using IossHas3ParametersConstructor =
-        decltype(DerivedFromIossGroupingEntity<T>{}, T(nullptr, std::string{}, int64_t{}));
-
-    template <typename T>
-    using IossHas4ParametersConstructor =
-        decltype(DerivedFromIossGroupingEntity<T>{},
-                 T(nullptr, std::string{}, std::string{}, int64_t{}));
-
-    template <typename T>
-    auto NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                   const std::string & /*entity_type*/, size_t entity_count)
-        -> IossHas3ParametersConstructor<T> *;
-
-    template <typename T>
-    auto NewEntity(DatabaseIO *io_database, const std::string &my_name,
-                   const std::string &entity_type, size_t entity_count)
-        -> IossHas4ParametersConstructor<T> *;
 
     void        get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map);
     void        compute_block_membership__(Ioss::SideBlock *         efblock,
                                            std::vector<std::string> &block_membership) const;
     void        define_properties(const Ioss::GroupingEntity * entity_block,
                                   const std::string &               encoded_entity_name);
-    std::string get_property_variable_name(const std::string &property_name);
-    std::vector<std::string> properties_to_save(const Ioss::GroupingEntity *const entity_block);
 
     void check_processor_info();
 
     int  RankInit();
     bool begin_state__(int state, double time) override;
     bool end_state__(int state, double time) override;
-
-    int find_field_in_mapset(const std::string &entity_type, const std::string &field_name,
-                             const std::map<std::string, std::set<std::string>> &mapset) const;
     unsigned long rank; // rank needs to be declared first to be initialized before adios_wrapper.
     mutable AdiosWrapper adios_wrapper; // adios_wrapper needs to be declared before bpio
                                         // and bp_engine to be initialized first.

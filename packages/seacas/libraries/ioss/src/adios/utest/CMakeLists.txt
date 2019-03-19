@@ -1,0 +1,28 @@
+
+#   TRIBITS_ADD_EXECUTABLE_AND_TEST(
+#     Test_KLU
+#     SOURCES cxx_main.cpp
+#     ARGS 
+#     NUM_MPI_PROCS 4
+#     COMM serial mpi
+#     )
+
+
+
+TRIBITS_ADD_EXECUTABLE(
+ Ut_ioad
+ SOURCES Ut_ioad.C
+ DEPLIBS Ionit Ioad
+)
+
+TRIBITS_ADD_TEST(
+	Ut_ioad
+	NAME Ut_ioad
+	NUM_MPI_PROCS 1
+)
+
+INCLUDE_DIRECTORIES(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../"
+  "${CMAKE_CURRENT_BINARY_DIR}/../"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../"
+)
