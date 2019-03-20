@@ -13,6 +13,10 @@
 #include "Ioss_FaceBlock.h"      // for FaceBlock
 #include "Ioss_FaceSet.h"        // for FaceSet
 #include "Ioss_NodeSet.h"         // for NodeSet
+#include <Ioss_SubSystem.h>
+#include "Ioss_Region.h"
+#include "Ioss_VariableType.h"
+#include "Ioss_Property.h"
 
 #include "Ioss_DatabaseIO.h" // for DatabaseIO
 
@@ -21,6 +25,7 @@
 
 #include "adios/Ioad_TemplateToValue.h"
 #include "adios/Ioad_Helper.h"
+#include "adios/Ioad_Constants.h"
 
 
 #ifdef SEACAS_HAVE_MPI
@@ -28,6 +33,15 @@
 #else
 #define MPI_COMM_WORLD 1
 #endif
+
+#include <string>
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <stddef.h> // for size_t
+#include <stdlib.h> // for rand, srand, RAND_MAX
+#include <string>   // for string
+#include <ostream>
 
 
 int main(int argc, char* argv[])
@@ -43,14 +57,367 @@ int main(int argc, char* argv[])
   return result;
 }
 
+
+#define COMPARE_POINTERS_AND_THROW_WITH_INDEX(obj_type, obj1, obj2, meth, index) \
+  if(obj1->meth(index) != obj2->meth(index)) { \
+          std::ostringstream error; \
+          error << #obj_type  " " #meth " do not match:\n" \
+                << "1:" #index " - " << obj1->meth(index) << "\n" \
+                << "2:" #index " - " << obj2->meth(index) << "\n"; \
+          throw(error.str()); \
+  }
+
+void CompareVariableType(const Ioss::VariableType* var1, const Ioss::VariableType* var2)
+{
+  COMPARE_POINTERS_AND_THROW_WITH_INDEX(VariableType, var1, var2, name,);
+  COMPARE_POINTERS_AND_THROW_WITH_INDEX(VariableType, var1, var2, component_count,);
+  COMPARE_POINTERS_AND_THROW_WITH_INDEX(VariableType, var1, var2, suffix_count,);
+  
+  for(int i=1; i <=var1->component_count(); i++) {
+    COMPARE_POINTERS_AND_THROW_WITH_INDEX(VariableType, var1, var2, label, i);
+    //COMPARE_POINTERS_AND_THROW_WITH_INDEX(VariableType, var1, var2, label_name, i);
+    }
+}
+
+#define COMPARE_VALUES_AND_THROW(obj_type, obj1, obj2, meth) \
+  if(obj1.meth() != obj2.meth()) { \
+          std::ostringstream error; \
+          error << #obj_type  " " #meth " do not match:\n" \
+                << "1: " << obj1.meth() << "\n" \
+                << "2: " << obj2.meth() << "\n"; \
+          throw(error.str()); \
+  }
+
+template <typename T>
+bool CompareVectors(const std::vector<T> &v1, const std::vector<T> &v2) {
+  std::vector<T> v3;
+  std::set_difference(v1.begin(), v1.end(), v2.begin(), v2.end(),
+                        std::back_inserter(v3));
+  if (v3.empty()) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+#define COMPARE_VECTORS_AND_THROW(name, vec1, vec2) \
+  if(!CompareVectors(vec1, vec2)) { \
+          std::ostringstream error; \
+          error << "Vectors " << name << " do not match:\n"; \
+          throw(error.str()); \
+  }
+
+void CompareFields(const Ioss::Field &field1, const Ioss::Field &field2)
+{
+  // Check that type is the same for both fields
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, get_type);
+  CompareVariableType(field1.raw_storage(), field2.raw_storage());
+  CompareVariableType(field1.transformed_storage(), field2.transformed_storage());
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, raw_count);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, transformed_count);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, get_size);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, get_role);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, has_transform);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, is_valid);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, is_invalid);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, get_name);
+  COMPARE_VALUES_AND_THROW(Field, field1, field2, get_type);
+}
+
+  // Compare fields
+  // compare properties
+void CompareProperties(const Ioss::Property &prop1, const Ioss::Property &prop2)
+{
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_name);
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_type);
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, is_valid);
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, is_invalid);
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, is_explicit);
+  COMPARE_VALUES_AND_THROW(Property, prop1, prop2, is_implicit);
+  switch(prop1.get_type()) {
+    case Ioss::Property::BasicType::REAL:
+    COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_real);
+    break;
+    case Ioss::Property::BasicType::INTEGER:
+    COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_int);
+    break;
+    case Ioss::Property::BasicType::POINTER:
+    // TODO: Verify that is makes sense.
+    COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_pointer);
+    break;
+    case Ioss::Property::BasicType::STRING:
+    COMPARE_VALUES_AND_THROW(Property, prop1, prop2, get_string);
+    break;
+    case Ioss::Property::BasicType::INVALID:
+    default:
+    throw("Unsupported property type " + prop1.get_name());
+  }
+}
+
+template<typename T, typename TF>
+void CompareFieldData(const T entity_block1, const T entity_block2, const std::string &field_name)
+{
+  std::vector<TF> data1;
+  std::vector<TF> data2;
+  entity_block1->get_field_data(field_name, data1);
+  entity_block2->get_field_data(field_name, data2);
+  COMPARE_VECTORS_AND_THROW(field_name, data1, data2);
+}
+
+template<typename T>
+void CompareFieldData(const T entity_block1, const T entity_block2, const std::string& field_name)
+{
+  auto field = entity_block1->get_field(field_name);
+  switch (field.get_type()) {
+  case Ioss::Field::BasicType::DOUBLE:
+    CompareFieldData<T, double>(entity_block1, entity_block2, field_name);
+    break;
+  case Ioss::Field::BasicType::INT32:
+    CompareFieldData<T, int32_t>(entity_block1, entity_block2, field_name);
+    break;
+  case Ioss::Field::BasicType::INT64:
+    CompareFieldData<T, int64_t>(entity_block1, entity_block2, field_name);
+    break;
+  case Ioss::Field::BasicType::COMPLEX:
+    //CompareFieldData<T, Complex>(entity_block1, entity_block2, field_name);
+    break;
+  case Ioss::Field::BasicType::CHARACTER:
+    CompareFieldData<T, char>(entity_block1, entity_block2, field_name);
+    break;
+  default:
+    std::ostringstream errmsg;
+    throw("INTERNAL ERROR: Invalid field type. Something is wrong in the the input entity block.");
+  }
+}
+
+template <typename T>
+void CompareContainers(const T &entity_blocks1, const T &entity_blocks2) {
+  for (auto entity_block1 : entity_blocks1) {
+    // Find corresponding block in vector
+
+    auto entity_block2 = std::find_if(
+        entity_blocks2.begin(), entity_blocks2.end(),
+        [=](typename T::value_type e) { return e->name() == entity_block1->name(); });
+    if (entity_block2 != entity_blocks2.end()) {
+      Ioss::NameList block1_field_names;
+      entity_block1->field_describe(&block1_field_names);
+      Ioss::NameList block2_field_names;
+      (*entity_block2)->field_describe(&block2_field_names);
+      // Sorts vectors before comparing them
+      std::sort(block1_field_names.begin(), block1_field_names.end());
+      std::sort(block2_field_names.begin(), block2_field_names.end());
+      COMPARE_VECTORS_AND_THROW(entity_block1->name(), block1_field_names, block2_field_names);
+
+      for (auto name1 : block1_field_names) {
+        // Check that the content is the same.
+        auto field1 = entity_block1->get_fieldref(name1);
+        auto field2 = (*entity_block2)->get_fieldref(name1);
+
+        CompareFields(field1, field2);
+        CompareFieldData(entity_block1, (*entity_block2), name1);
+      }
+
+      std::vector<std::string> block1_property_list;
+      entity_block1->property_describe(&block1_property_list);
+      std::vector<std::string> block2_property_list;
+      (*entity_block2)->property_describe(&block2_property_list);
+      for (auto property_name1 : block1_property_list) {
+        entity_block1->get_property(property_name1);
+        auto property_name2 =
+            std::find(std::begin(block2_property_list),
+                      std::end(block2_property_list), property_name1);
+        if (property_name2 != block2_property_list.end()) {
+          // Check that the content is the same.
+          auto property1 = entity_block1->get_property(property_name1);
+          auto property2 = (*entity_block2)->get_property(property_name1);
+
+          CompareProperties(property1, property2);
+        } else {
+          throw("Property name " + property_name1 + " not found in db2");
+        } 
+      }
+
+// State 	get_state () const 
+// const std::string & 	name () const
+// std::string 	generic_name () const
+// bool 	is_alias (const std::string &my_name) const
+// virtual void 	block_membership (std::vector< std::string > &block_members)
+// virtual std::string 	type_string () const =0
+// virtual std::string 	short_type_string ()
+// virtual std::string 	contains_string ()
+// virtual EntityType 	type () const =0
+// bool 	property_exists (const std::string &property_name) const
+// Property 	get_property (const std::string &property_name) const
+// int 	property_describe (NameList *names) const
+// size_t 	property_count () const
+// bool 	field_exists (const std::string &field_name) const
+// size_t 	field_count () const
+// size_t 	field_count (Field::RoleType role) const
+// Ioss::Field::BasicType 	field_int_type () const
+// unsigned int 	hash () const
+// int64_t 	entity_count () const
+
+    }
+  }
+}
+
+  void CompareDB(Ioss::DatabaseIO* db1, Ioss::DatabaseIO* db2) {
+    std::shared_ptr<Ioss::Region> region1(new Ioss::Region(db1));
+    std::shared_ptr<Ioss::Region> region2(new Ioss::Region(db2));
+
+    // Compare all containers
+    // Node blocks --
+    CompareContainers(region1->get_node_blocks(), region2->get_node_blocks());
+    CompareContainers(region1->get_edge_blocks(), region2->get_edge_blocks());
+    CompareContainers(region1->get_face_blocks(), region2->get_face_blocks());
+    CompareContainers(region1->get_element_blocks(),
+                      region2->get_element_blocks());
+    CompareContainers(region1->get_nodesets(), region2->get_nodesets());
+    CompareContainers(region1->get_edgesets(), region2->get_edgesets());
+    CompareContainers(region1->get_facesets(), region2->get_facesets());
+    CompareContainers(region1->get_elementsets(), region2->get_elementsets());
+    CompareContainers(region1->get_commsets(), region2->get_commsets());
+    CompareContainers(region1->get_sidesets(), region2->get_sidesets());
+    // CompareContainers(region1->get_sideblocks(), region2->get_sideblocks());
+
+    // Is there any global properties?
+    // Is there any global field or map?
+  }
+
+
+template<typename Entity, typename T> void put_field_data(std::string field_name, int local_size, size_t component_count, Entity *e)
+{
+        std::vector<T> data;
+        size_t data_size = local_size*component_count;
+        data.reserve(data_size);
+        for(size_t i=0; i<data_size; ++i) {
+          data.push_back(i+1);//Ids must be >0
+        }
+
+        int num_ids_written = e->put_field_data(field_name, data);
+        if ( local_size != num_ids_written) {
+          std::ostringstream msg ;
+          msg << " FAILED in put_field_data:" ;
+          msg << " field_name = " << field_name ;
+          msg << " , num_nodes = " << local_size ;
+          msg << " , num_ids_written = " << num_ids_written ;
+          throw std::runtime_error( msg.str() );
+        }
+}
+
+template <typename Entity> void write_fields(Entity *e, Ioss::Field::RoleType role)
+{
+  std::vector<std::string> field_names;
+  e->field_describe(&field_names);
+  for (auto field_name : field_names) {
+    Ioss::Field field = e->get_field(field_name);
+    if (field.get_role() != role) {
+      continue;
+    }
+    std::string entity_type = e->type_string();
+
+    if (Ioad::find_field_in_mapset(entity_type, field_name, Ioad::Ignore_fields)) {
+      continue;
+    }
+    if(field_name == "owning_processor") {
+      continue;
+    }
+    // Always use `raw_count()` for these tests.
+    size_t      component_count;
+    size_t      local_size;
+
+    if (Ioad::use_transformed_storage(field, entity_type, field_name)) {
+      component_count = field.transformed_storage()->component_count();
+      local_size      = field.transformed_count();
+    }
+    else {
+      component_count = field.raw_storage()->component_count();
+      local_size      = field.raw_count();
+    }
+    switch (field.get_type()) {
+    case Ioss::Field::BasicType::DOUBLE:
+      put_field_data<Ioss::NodeBlock, double>(field_name, local_size, component_count, e);
+      break;
+    case Ioss::Field::BasicType::INT32:
+      put_field_data<Ioss::NodeBlock, int32_t>(field_name, local_size, component_count, e);
+      break;
+    case Ioss::Field::BasicType::INT64:
+      put_field_data<Ioss::NodeBlock, int64_t>(field_name, local_size, component_count, e);
+      break;
+    case Ioss::Field::BasicType::COMPLEX:
+      put_field_data<Ioss::NodeBlock, Complex>(field_name, local_size, component_count, e);
+      break;
+    case Ioss::Field::BasicType::CHARACTER:
+      put_field_data<Ioss::NodeBlock, char>(field_name, local_size, component_count, e);
+      break;
+    default:
+      std::ostringstream errmsg;
+      errmsg << "INTERNAL ERROR: Invalid field type. "
+             << "Something is wrong in the Ioad::DatabaseIO::get_field_internal_t() function. "
+             << "Please report.\n";
+      IOSS_ERROR(errmsg);
+    }
+  }
+}
+
+void create_phantom(Ioss::DatabaseIO *db)
+{
+  // Create region.
+  Ioss::Region* region = new Ioss::Region(db);
+  region->begin_mode(Ioss::STATE_DEFINE_MODEL);
+  db->set_region(region);
+  // Create a NodeBlock with some fields
+  int64_t node_count = 10;
+  Ioss::NodeBlock * node_block = new Ioss::NodeBlock(db, "nodeblock_1", node_count, 3);
+  region->add(node_block);
+  // Define some transient fields
+  std::vector< std::string > field_names{"field1", "field2"};
+  for(auto field_name: field_names) {
+    // Exodus seems to always save TRANSIENT fields as `REAL`, so for the tests to pass
+    // we only use this type.
+    Ioss::Field field(field_name, Ioss::Field::BasicType::REAL, "scalar",
+                          Ioss::Field::RoleType::TRANSIENT, node_count);
+        node_block->field_add(field);
+  }
+  // Fill up the fields with some values.
+  region->end_mode(Ioss::STATE_DEFINE_MODEL);
+  region->begin_mode(Ioss::STATE_MODEL);
+  write_fields(node_block, Ioss::Field::RoleType::MESH);
+  region->end_mode(Ioss::STATE_MODEL);
+  region->begin_mode(Ioss::STATE_DEFINE_TRANSIENT);
+  region->end_mode(Ioss::STATE_DEFINE_TRANSIENT);
+  region->begin_mode(Ioss::STATE_TRANSIENT);
+  region->add_state(0.1);
+  region->begin_state(1);
+  write_fields(node_block, Ioss::Field::RoleType::TRANSIENT);
+  region->end_state(1);
+  region->end_mode(Ioss::STATE_TRANSIENT);
+}
+
+void create_database(std::string type, std::string file_name)
+{
+    std::shared_ptr<Ioss::DatabaseIO> db(Ioss::IOFactory::create(
+          type, file_name, Ioss::WRITE_RESULTS, MPI_COMM_WORLD));
+    create_phantom(db.get());
+    db->closeDatabase();
+}
+
 TEST_CASE("Ioad", "[Ioad]")
 {
 
     Ioss::Init::Initializer::initialize_ioss();
-
-    // Ioss::DatabaseIO *db = Ioss::IOFactory::create(
-    //       "adios", "noname", Ioss::READ_MODEL, MPI_COMM_WORLD);
-
+    std::string exodus_db_name = "phantom.e";
+    std::string adios_db_name = "phantom.bp";
+    create_database("exodus", exodus_db_name);
+    create_database("adios", adios_db_name);
+    Ioss::DatabaseIO * read_exodus_db = Ioss::IOFactory::create(
+          "exodus", exodus_db_name, Ioss::READ_MODEL, MPI_COMM_WORLD);
+    read_exodus_db->set_int_byte_size_api(Ioss::USE_INT64_API);
+    Ioss::DatabaseIO * read_adios_db = Ioss::IOFactory::create(
+          "adios", adios_db_name, Ioss::READ_MODEL, MPI_COMM_WORLD);
+    CompareDB(read_exodus_db, read_adios_db);
+    delete read_adios_db;
+    delete read_exodus_db;
 }
 
   template <typename T> const std::string get_entity_type_test()
