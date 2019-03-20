@@ -691,26 +691,6 @@ namespace Ioad {
                                          void *data, size_t data_size) const
   {
     return put_field_internal_t(ss, field, data, data_size);
-    // int64_t res = put_field_internal_t(ss, field, data, data_size);
-    // if (res) {
-    //   std::string                   encoded_name = encode_sideblock_name(ss->type_string(),
-    //   ss->name()); adios2::Variable<std::string> entities =
-    //       adios_wrapper.InquireVariable<std::string>(encoded_name);
-    //   std::vector<std::string> block_members;
-    //   for (auto &sb : ss->get_side_blocks()) {
-    //     block_members.push_back(sb->name());
-    //   }
-    //   if (entities && block_members.size()) {
-    //     std::string stringified_block_members;
-    //     for (std::string s : block_members) {
-    //       stringified_block_members += "/" + s;
-    //     }
-    //     adios_wrapper.Put<std::string>(
-    //         entities, stringified_block_members,
-    //         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    //   }
-    // }
-    // return res;
   }
 
   int64_t DatabaseIO::put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
@@ -1450,26 +1430,6 @@ namespace Ioad {
                                          void *data, size_t data_size) const
   {
     return get_field_internal_t(ss, field, data, data_size);
-
-    // if (res) {
-    //   std::string                   encoded_name = encode_sideblock_name(ss->type_string(),
-    //   ss->name()); adios2::Variable<std::string> entities =
-    //       adios_wrapper.InquireVariable<std::string>(encoded_name);
-    //   std::vector<std::string> block_members;
-    //   for (auto &sb : ss->get_side_blocks()) {
-    //     block_members.push_back(sb->name());
-    //   }
-    //   if (entities && block_members.size()) {
-    //     std::string stringified_block_members;
-    //     for (std::string s : block_members) {
-    //       stringified_block_members += "/" + s;
-    //     }
-    //     adios_wrapper.Put<std::string>(
-    //         entities, stringified_block_members,
-    //         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    //   }
-    // }
-    // return res;
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
                                          void *data, size_t data_size) const
