@@ -372,7 +372,7 @@ namespace Ioad {
       local_size      = field.raw_count();
     }
     adios_wrapper.DefineVariable<T>(encoded_name, {number_proc, INT_MAX, component_count},
-                                    {rank, 0, 0}, {1, local_size, component_count});
+                                  {rank, 0, 0}, {1, local_size, component_count});
   }
 
 
@@ -450,14 +450,14 @@ namespace Ioad {
           define_model_internal<char>(field, encoded_name, entity_type, field_name);
           break;
         case Ioss::Field::BasicType::STRING:
-          adios_wrapper.DefineVariable<std::string>(
-              encoded_name,
-              // Global dimensions
-              {field.raw_count()},
-              // starting offset of the local array in the global space
-              {0},
-              // local size, could be defined later using SetSelection()
-              {field.raw_count()});
+            adios_wrapper.DefineVariable<std::string>(
+                encoded_name,
+                // Global dimensions
+                {field.raw_count()},
+                // starting offset of the local array in the global space
+                {0},
+                // local size, could be defined later using SetSelection()
+                {field.raw_count()});
           break;
         default:
           std::ostringstream errmsg;
@@ -791,8 +791,9 @@ namespace Ioad {
     }
     auto block = new Ioss::NodeBlock(this, block_name, model_coordinates_infos.node_boundaries_size,
                                      spatialDimension);
-    Ioss::NameList field_names;
-    block->field_describe(&field_names);
+    // TODO Remove these lines that look useless.
+    // Ioss::NameList field_names;
+    // block->field_describe(&field_names);
     block->property_add(Ioss::Property("id", 1));
     block->property_add(Ioss::Property("guid", util().generate_guid(1)));
     for (auto &variable : entity_map.at(block_name)) {

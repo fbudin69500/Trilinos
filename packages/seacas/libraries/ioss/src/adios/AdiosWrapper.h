@@ -52,6 +52,12 @@ namespace Ioad {
     void EndStep();
     template <typename T>
     void DefineMetaVariable(const std::string &meta_name, const std::string &variable_name = "");
+
+    template <typename T>
+    void DefineVariable(const std::string &name, const adios2::Dims &shape = adios2::Dims(),
+                                    const adios2::Dims &start = adios2::Dims(), const adios2::Dims &count = adios2::Dims(),
+                                    const bool constantDims = false);
+
     template <typename T>
     void PutMetaVariable(const std::string &meta_name, T value,
                          const std::string &variable_name = "");
@@ -68,7 +74,6 @@ namespace Ioad {
     using adios2::Engine::Put;
     using adios2::IO::AvailableVariables;
     using adios2::IO::DefineAttribute;
-    using adios2::IO::DefineVariable;
     using adios2::IO::InquireAttribute;
     using adios2::IO::InquireVariable;
 
