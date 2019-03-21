@@ -216,10 +216,15 @@ namespace Ioad {
   void DatabaseIO::write_meta_data()
   {
     Ioss::Region *                  region      = get_region();
+    const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
+
+    assert(node_blocks.size() == 1);
+
+    spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
+
     // Region
     write_properties(region, encode_field_name({region->type_string(), region_name}));
     // Node blocks --
-    const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
     write_meta_data_container<Ioss::NodeBlockContainer>(node_blocks);
     // Edge Blocks --
     const Ioss::EdgeBlockContainer &edge_blocks = region->get_edge_blocks();
@@ -556,7 +561,7 @@ namespace Ioad {
       Ioss::SerializeIO serializeIO__(this);
 
       int                   num_to_get = field.verify(data_size);
-      throw "Not impleemented";
+      throw "Not implemented";
       return num_to_get;
     }
   }
@@ -612,7 +617,7 @@ namespace Ioad {
       return 0;
     }
     std::string        entity_type = entity->type_string();
-    const std::string &field_name  = field.get_name();
+    const std::string &field_name = field.get_name();
     if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
       return 0;
     }
@@ -1258,9 +1263,11 @@ namespace Ioad {
   void DatabaseIO::read_meta_data__()
   {
     check_processor_info();
+    Ioss::Region *    region = get_region();
+
     // Define properties
     if(is_streaming) {
-       get_region()->property_update("streaming", 1);
+       region->property_update("streaming", 1);
     }
     // Only get schema version attribute as it is the only one we expect.
     get_attribute<unsigned int>(Schema_version_string);
@@ -1323,7 +1330,12 @@ namespace Ioad {
     get_entities<Ioss::ElementSet>(fields_map, properties_map);
     get_entities<Ioss::CommSet>(fields_map, properties_map);
 
-// Ioss::Region *    region = get_region();
+    // Add region missing properties.
+    if (!region->property_exists("title")) {
+      Ioss::Property title_property("title", "IOSS Default Output Title");
+      region->property_add(title_property);
+    }
+
 //     region->property_add(Ioss::Property("global_node_count", global_nodes));
 //     region->property_add(Ioss::Property("global_element_count", global_elements));
 //     region->property_add(Ioss::Property("global_element_block_count", global_eblocks));
@@ -1385,76 +1397,105 @@ namespace Ioad {
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    return get_field_internal_t(nb, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(eb, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(fb, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(eb, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(sb, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(ns, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(es, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(fs, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(es, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(ss, field, data, data_size);
-  }
-  int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
-                                         void *data, size_t data_size) const
-  {
-    return get_field_internal_t(cs, field, data, data_size);
-  }
-
-  int64_t DatabaseIO::get_field_internal_t(const Ioss::GroupingEntity *entity,
-                                           const Ioss::Field &field, void *data,
-                                           size_t data_size) const
-  {
-    if (!data || !data_size) {
-      return 0;
-    }
-    int num_to_get = field.verify(data_size);
+    size_t num_to_get = field.verify(data_size);
     if (num_to_get > 0) {
-      const std::string  entity_type = entity->type_string();
+      if (field.get_name() == "mesh_model_coordinates_x" ||
+      field.get_name() == "mesh_model_coordinates_y" ||
+      field.get_name() == "mesh_model_coordinates_z") {
+        Ioss::Field coord_field = nb->get_field("mesh_model_coordinates");
+        std::vector<double> coord(num_to_get*spatialDimension);
+        get_field_internal_t(nb, coord_field, coord.data(), data_size*spatialDimension);
 
-      // Check if field name has changed. Rely on property `original_name` if
-      // it exists.
-      const std::string entity_name = entity->property_exists(original_name)
-                                          ? entity->get_property(original_name).get_string()
-                                          : entity->name();
-      const std::string &field_name = field.get_name();
+        // Cast 'data' to correct size -- double
+        double *rdata = static_cast<double *>(data);
+        int offset = 0;
+        if(field.get_name() == "mesh_model_coordinates_x") {
+          offset = 0;
+        }
+        else if(field.get_name() == "mesh_model_coordinates_y") {
+          offset = 1;
+        }
+        else if(field.get_name() == "mesh_model_coordinates_z") {
+          offset = 2;
+        }
+        for (size_t i = 0; i < num_to_get; i++) {
+          rdata[i] = coord[i*spatialDimension+offset];
+        }
+      }
+      else {
+        return get_field_internal_t(nb, field, data, data_size);
+      }
+    }
+    return num_to_get;
+  }
+
+    int64_t DatabaseIO::get_field_internal(const Ioss::EdgeBlock *eb, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(eb, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::FaceBlock *fb, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(fb, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(eb, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sb, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(sb, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::NodeSet *ns, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(ns, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::EdgeSet *es, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(es, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::FaceSet *fs, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(fs, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::ElementSet *es, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(es, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::SideSet *ss, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(ss, field, data, data_size);
+    }
+    int64_t DatabaseIO::get_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field,
+                                           void *data, size_t data_size) const
+    {
+      return get_field_internal_t(cs, field, data, data_size);
+    }
+
+    int64_t DatabaseIO::get_field_internal_t(const Ioss::GroupingEntity *entity,
+                                             const Ioss::Field &field, void *data, size_t data_size) const
+    {
+      if (!data || !data_size) {
+        return 0;
+      }
+      int num_to_get = field.verify(data_size);
+      if (num_to_get > 0) {
+        const std::string entity_type = entity->type_string();
+
+        // Check if field name has changed. Rely on property `original_name` if
+        // it exists.
+        const std::string entity_name = entity->property_exists(original_name)
+                                            ? entity->get_property(original_name).get_string()
+                                            : entity->name();
+        const std::string & field_name = field.get_name();
 
       if (find_field_in_mapset(entity_type, field_name, Ignore_fields)) {
         return num_to_get;

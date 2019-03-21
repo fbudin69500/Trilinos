@@ -44,6 +44,16 @@
 #include <ostream>
 
 
+//////// Global constants ////////////
+std::vector<std::string> ignored_properties = {"internal_element_count", "database_name", "global_element_block_count", 
+"internal_node_count", "border_element_count", "global_node_count", "global_element_count", "global_node_set_count", "border_node_count", "global_side_set_count"};
+
+std::vector<std::string> ignored_fields = {"implicit_ids"};
+std::vector<std::string> ignore_errors = {"owning_processor"};
+
+
+////////////////////////////
+
 int main(int argc, char* argv[])
 {
   #ifdef SEACAS_HAVE_MPI
@@ -190,8 +200,35 @@ void CompareFieldData(const T entity_block1, const T entity_block2, const std::s
   }
 }
 
+
+template <typename T> void CompareAllProperties(const T &obj1, const T &obj2)
+{
+  std::vector<std::string> block1_property_list;
+  obj1->property_describe(&block1_property_list);
+  std::vector<std::string> block2_property_list;
+  obj2->property_describe(&block2_property_list);
+  for (auto property_name1 : block1_property_list) {
+    if(std::find(ignored_properties.begin(), ignored_properties.end(), property_name1) != std::end(ignored_properties)) {
+      continue;
+    }
+    obj1->get_property(property_name1);
+    auto property_name2 =
+        std::find(std::begin(block2_property_list), std::end(block2_property_list), property_name1);
+    if (property_name2 != block2_property_list.end()) {
+      // Check that the content is the same.
+      auto property1 = obj1->get_property(property_name1);
+      auto property2 = obj2->get_property(property_name1);
+
+      CompareProperties(property1, property2);
+    }
+    else {
+      throw("Property name " + property_name1 + " not found in db2");
+    }
+  }
+}
+
 template <typename T>
-void CompareContainers(const T &entity_blocks1, const T &entity_blocks2) {
+void CompareContainers(const T &entity_blocks1, const T &entity_blocks2, Ioss::State state) {
   for (auto entity_block1 : entity_blocks1) {
     // Find corresponding block in vector
 
@@ -209,33 +246,22 @@ void CompareContainers(const T &entity_blocks1, const T &entity_blocks2) {
       COMPARE_VECTORS_AND_THROW(entity_block1->name(), block1_field_names, block2_field_names);
 
       for (auto name1 : block1_field_names) {
+        if (std::find(ignored_fields.begin(), ignored_fields.end(), name1) !=
+            std::end(ignored_fields)) {
+          continue;
+        }
         // Check that the content is the same.
         auto field1 = entity_block1->get_fieldref(name1);
         auto field2 = (*entity_block2)->get_fieldref(name1);
-
         CompareFields(field1, field2);
-        CompareFieldData(entity_block1, (*entity_block2), name1);
+        // Negated logical XOR
+        if ((state == Ioss::STATE_TRANSIENT) ==
+            (field1.get_role() == Ioss::Field::RoleType::TRANSIENT)) {
+          CompareFieldData(entity_block1, (*entity_block2), name1);
+        }
       }
 
-      std::vector<std::string> block1_property_list;
-      entity_block1->property_describe(&block1_property_list);
-      std::vector<std::string> block2_property_list;
-      (*entity_block2)->property_describe(&block2_property_list);
-      for (auto property_name1 : block1_property_list) {
-        entity_block1->get_property(property_name1);
-        auto property_name2 =
-            std::find(std::begin(block2_property_list),
-                      std::end(block2_property_list), property_name1);
-        if (property_name2 != block2_property_list.end()) {
-          // Check that the content is the same.
-          auto property1 = entity_block1->get_property(property_name1);
-          auto property2 = (*entity_block2)->get_property(property_name1);
-
-          CompareProperties(property1, property2);
-        } else {
-          throw("Property name " + property_name1 + " not found in db2");
-        } 
-      }
+      CompareAllProperties(entity_block1, (*entity_block2));
 
 // State 	get_state () const 
 // const std::string & 	name () const
@@ -261,28 +287,44 @@ void CompareContainers(const T &entity_blocks1, const T &entity_blocks2) {
   }
 }
 
+  void CompareRegions(Ioss::Region* region1, Ioss::Region* region2) {
+  
+    CompareAllProperties(region1, region2);
+    Ioss::State state = region1->get_state();
+    // Compare all containers
+    CompareContainers(region1->get_node_blocks(), region2->get_node_blocks(), state);
+    CompareContainers(region1->get_edge_blocks(), region2->get_edge_blocks(), state);
+    CompareContainers(region1->get_face_blocks(), region2->get_face_blocks(), state);
+    CompareContainers(region1->get_element_blocks(),
+                      region2->get_element_blocks(), state);
+    CompareContainers(region1->get_nodesets(), region2->get_nodesets(), state);
+    CompareContainers(region1->get_edgesets(), region2->get_edgesets(), state);
+    CompareContainers(region1->get_facesets(), region2->get_facesets(), state);
+    CompareContainers(region1->get_elementsets(), region2->get_elementsets(), state);
+    CompareContainers(region1->get_commsets(), region2->get_commsets(), state);
+    CompareContainers(region1->get_sidesets(), region2->get_sidesets(), state);
+    // CompareContainers(region1->get_sideblocks(), region2->get_sideblocks());
+
+    // Is there any global field or map?
+  }
+
+
   void CompareDB(Ioss::DatabaseIO* db1, Ioss::DatabaseIO* db2) {
     std::shared_ptr<Ioss::Region> region1(new Ioss::Region(db1));
     std::shared_ptr<Ioss::Region> region2(new Ioss::Region(db2));
+    CompareRegions(region1.get(), region2.get());
+    // Region properties have been compared previously.
+    int timestep_count = region1->get_property("state_count").get_int();
+    for (int step = 1; step <= timestep_count; step++) {
+      region1->begin_state(step);
+      region2->begin_state(step);
 
-    // Compare all containers
-    // Node blocks --
-    CompareContainers(region1->get_node_blocks(), region2->get_node_blocks());
-    CompareContainers(region1->get_edge_blocks(), region2->get_edge_blocks());
-    CompareContainers(region1->get_face_blocks(), region2->get_face_blocks());
-    CompareContainers(region1->get_element_blocks(),
-                      region2->get_element_blocks());
-    CompareContainers(region1->get_nodesets(), region2->get_nodesets());
-    CompareContainers(region1->get_edgesets(), region2->get_edgesets());
-    CompareContainers(region1->get_facesets(), region2->get_facesets());
-    CompareContainers(region1->get_elementsets(), region2->get_elementsets());
-    CompareContainers(region1->get_commsets(), region2->get_commsets());
-    CompareContainers(region1->get_sidesets(), region2->get_sidesets());
-    // CompareContainers(region1->get_sideblocks(), region2->get_sideblocks());
-
-    // Is there any global properties?
-    // Is there any global field or map?
+      CompareRegions(region1.get(), region2.get());
+      region1->end_state(step);
+      region2->end_state(step);
+    }
   }
+
 
 
 template<typename Entity, typename T> void put_field_data(std::string field_name, int local_size, size_t component_count, Entity *e)
@@ -291,10 +333,23 @@ template<typename Entity, typename T> void put_field_data(std::string field_name
         size_t data_size = local_size*component_count;
         data.reserve(data_size);
         for(size_t i=0; i<data_size; ++i) {
-          data.push_back(i+1);//Ids must be >0
+          if(field_name=="owning_processor") {
+            int rank = 0;
+            #ifdef SEACAS_HAVE_MPI
+            MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+            #endif
+            data.push_back(rank);
+          }
+          else {
+            data.push_back(i+1);//Ids must be >0
+          }
         }
 
         int num_ids_written = e->put_field_data(field_name, data);
+        if (std::find(ignore_errors.begin(), ignore_errors.end(), field_name) !=
+            std::end(ignore_errors)) {
+          return;
+        }
         if ( local_size != num_ids_written) {
           std::ostringstream msg ;
           msg << " FAILED in put_field_data:" ;
@@ -317,9 +372,6 @@ template <typename Entity> void write_fields(Entity *e, Ioss::Field::RoleType ro
     std::string entity_type = e->type_string();
 
     if (Ioad::find_field_in_mapset(entity_type, field_name, Ioad::Ignore_fields)) {
-      continue;
-    }
-    if(field_name == "owning_processor") {
       continue;
     }
     // Always use `raw_count()` for these tests.
@@ -410,14 +462,13 @@ TEST_CASE("Ioad", "[Ioad]")
     std::string adios_db_name = "phantom.bp";
     create_database("exodus", exodus_db_name);
     create_database("adios", adios_db_name);
+    // Database pointers are deleted by their respective region destructors.
     Ioss::DatabaseIO * read_exodus_db = Ioss::IOFactory::create(
           "exodus", exodus_db_name, Ioss::READ_MODEL, MPI_COMM_WORLD);
     read_exodus_db->set_int_byte_size_api(Ioss::USE_INT64_API);
     Ioss::DatabaseIO * read_adios_db = Ioss::IOFactory::create(
           "adios", adios_db_name, Ioss::READ_MODEL, MPI_COMM_WORLD);
     CompareDB(read_exodus_db, read_adios_db);
-    delete read_adios_db;
-    delete read_exodus_db;
 }
 
   template <typename T> const std::string get_entity_type_test()

@@ -63,7 +63,8 @@ namespace Ioad {
         {"FaceBlock", {"connectivity_edge"}}};
     const std::map<std::string, std::set<std::string>> Ignore_fields = {
         {"NodeBlock",
-         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids"}},
+         {"connectivity", "connectivity_raw", "node_connectivity_status", "implicit_ids",
+         "mesh_model_coordinates_x", "mesh_model_coordinates_y", "mesh_model_coordinates_z"}},
         {"ElementBlock", {"implicit_ids"}},
         {"FaceBlock", {"connectivity_raw"}},
         {"EdgeBlock", {"connectivity_raw"}},
@@ -76,6 +77,7 @@ namespace Ioad {
         "streaming_status", "streaming",  // Properties added during processing. Should not be saved.
         "entity_count"  // Set in GroupingEntity constructor and can be different accross mpi processes.
         }};
+
 } // namespace
 
 #endif
