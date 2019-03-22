@@ -590,17 +590,11 @@ void DatabaseIO::define_coordinate_frames_internal(const Ioss::CoordinateFrameCo
 
   //------------------------------------------------------------------------
   // TODO: Complete Region function
-  int64_t DatabaseIO::put_field_internal(const Ioss::Region * /* region */,
+  int64_t DatabaseIO::put_field_internal(const Ioss::Region * reg,
                                          const Ioss::Field &field, void *data,
                                          size_t data_size) const
   {
-    {
-      Ioss::SerializeIO serializeIO__(this);
-
-      int                   num_to_get = field.verify(data_size);
-      throw "Not implemented";
-      return num_to_get;
-    }
+    return put_field_internal_t(reg, field, data, data_size);
   }
 
   // Returns byte size of integers stored on the database...
@@ -1474,8 +1468,7 @@ void DatabaseIO::define_coordinate_frames_internal(const Ioss::CoordinateFrameCo
   int64_t DatabaseIO::get_field_internal(const Ioss::Region *reg, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
-    throw "Not implemented yet";
-    return 0;
+    return get_field_internal_t(reg, field, data, data_size);
   }
   int64_t DatabaseIO::get_field_internal(const Ioss::NodeBlock *nb, const Ioss::Field &field,
                                          void *data, size_t data_size) const
