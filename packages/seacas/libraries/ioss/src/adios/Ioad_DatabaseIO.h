@@ -36,6 +36,8 @@
 
 #include <Ioss_DBUsage.h>
 #include <Ioss_DatabaseIO.h>
+#include "Ioss_Region.h"          // for Region, SideSetContainer, etc
+#include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
 #include "Ioss_EntitySet.h"
 
 #include "Ioss_Field.h" // for Field, etc
@@ -140,15 +142,11 @@ namespace Ioad {
     template<typename T>
     int64_t put_field_internal_t(T entity,
                                const Ioss::Field &field, void *data, size_t data_size) const;
-    void    read_meta_data__() override;
     void    define_model(Ioss::Field::RoleType *role = nullptr);
     // Model definition that should not be re-defined when defining transient variables.
     void    define_global_variables();
     template<typename T>  T get_attribute(const std::string &attribute_name);
-    // void read_region(adios2::IO & bpio);
 
-    int64_t element_global_to_local__(int64_t global) = delete;
-    int64_t node_global_to_local__(int64_t global, bool must_exist)  = delete;
     template <typename T>
     void put_data(void *data, const std::string &encoded_name) const;
     template <typename T, typename = typename std::enable_if<!std::is_base_of<Ioss::EntitySet, T>::value, T>::type >
@@ -166,6 +164,7 @@ namespace Ioad {
     {
       std::vector<size_t> steps;
       adios2::Dims Count;
+      size_t global_size{0};
     };
 
     struct FieldInfoType
@@ -221,6 +220,8 @@ namespace Ioad {
     void define_entity_meta_variables(const std::string &encoded_name);
 
     void define_field_meta_variables(const std::string &);
+    void define_coordinate_frames_internal(const Ioss::CoordinateFrameContainer &coordinate_frames);
+    std::string encoded_coordinate_frame_name(Ioss::CoordinateFrame coordinate_frame);
 
     void put_meta_variables(const std::string &encoded_name, const Ioss::Field &field,
                             const std::string &entity_type, const std::string &field_name) const;
@@ -233,9 +234,10 @@ namespace Ioad {
 
     void write_properties(const Ioss::GroupingEntity * const entity, const std::string & encoded_name);
 
-    template <typename T> void write_meta_data_container(const T &entity_blocks);
+    template <typename T> int64_t write_meta_data_container(const T &entity_blocks);
+    std::pair<int64_t, int64_t> write_meta_data_sideblockcontainer(const Ioss::SideBlockContainer &entity_blocks);
 
-    template <typename T> void              get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map);
+    template <typename T> int64_t              get_entities(const FieldsMapType &fields_map, const FieldsMapType &properties_map);
     std::string get_optional_string_variable(const std::string &field_name,
                                              const std::string &string_variable) const;
 
@@ -245,7 +247,11 @@ namespace Ioad {
     void        define_properties(const Ioss::GroupingEntity * entity_block,
                                   const std::string &               encoded_entity_name);
 
+    void    read_meta_data__() override;
+    void read_communication_metadata();
+    void read_region(const FieldsMapType &fields_map);
     void check_processor_info();
+    void check_model();
 
     int  RankInit();
     bool begin_state__(int state, double time) override;
@@ -254,6 +260,8 @@ namespace Ioad {
     mutable AdiosWrapper adios_wrapper; // adios_wrapper needs to be declared before bpio
                                         // and bp_engine to be initialized first.
     int           spatialDimension{0};
+    int64_t edgeCount{0};
+    int64_t faceCount{0};
     unsigned long number_proc;
     bool is_streaming;
     double previous_time_streaming;

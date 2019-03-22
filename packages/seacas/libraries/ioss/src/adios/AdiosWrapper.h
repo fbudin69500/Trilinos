@@ -55,44 +55,56 @@ namespace Ioad {
 
     template <typename T>
     void DefineVariable(const std::string &name, const adios2::Dims &shape = adios2::Dims(),
-                                    const adios2::Dims &start = adios2::Dims(), const adios2::Dims &count = adios2::Dims(),
-                                    const bool constantDims = false);
+                        const adios2::Dims &start        = adios2::Dims(),
+                        const adios2::Dims &count        = adios2::Dims(),
+                        const bool          constantDims = false);
+    template <typename T> void Put(const std::string &name, const T *value);
 
-    template <typename T>
-    void PutMetaVariable(const std::string &meta_name, T value,
-                         const std::string &variable_name = "");
-    template <typename T>
-    T GetMetaVariable(const std::string &meta_name, const std::string &variable_name = "");
-    std::pair<std::string, std::string> DecodeMetaName(std::string name) const;
-    std::string    EncodeMetaVariable(const std::string &meta_name,
-                                      const std::string &variable_name = "") const;
+  template <typename T>
+  void DefineAttribute(const std::string &name, const T &value);
 
-    bool IsStreaming() const {return m_IsStreaming;};
+  template <typename T> void InquireAndPut(const std::string &name, const T *value);
+  template <typename T> T GetAttribute(const std::string &attribute_name, bool ignore_missing = false, T default_value = T());
 
-    using adios2::Engine::AllStepsBlocksInfo;
-    using adios2::Engine::Get;
-    using adios2::Engine::Put;
-    using adios2::IO::AvailableVariables;
-    using adios2::IO::DefineAttribute;
-    using adios2::IO::InquireAttribute;
-    using adios2::IO::InquireVariable;
+  template <typename T> void GetSync(adios2::Variable<T> var, T *data);
 
-  private:
-    adios2::IO     IOInit(const Ioss::PropertyManager &properties, bool is_input);
-    adios2::Engine EngineInit(const std::string &filename, bool is_input);
+  template <typename T> void GetSync(std::string var_name, T *data);
+
+  template <typename T> void GetSync(adios2::Variable<T> var, T &data);
+  template <typename T> void GetSync(std::string var_name, T &data);
 
 
-    const std::string m_MetaSeparator{"::"};
+  template <typename T>
+  void PutMetaVariable(const std::string &meta_name, T value,
+                       const std::string &variable_name = "");
+  template <typename T>
+  T GetMetaVariable(const std::string &meta_name, const std::string &variable_name = "");
+  std::pair<std::string, std::string> DecodeMetaName(std::string name) const;
+  std::string                         EncodeMetaVariable(const std::string &meta_name,
+                                                         const std::string &variable_name = "") const;
 
-    const int m_Rank;
-    //  adios2::ADIOS *m_Adios;
-    const MPI_Comm m_Communicator;
+  bool IsStreaming() const { return m_IsStreaming; };
 
-    // adios2::IO             m_BPIO;
-    //  mutable adios2::Engine m_BPEngine;
-    bool m_OpenStep;
-    bool m_IsStreaming;
-    int count_real_begin = 0;
+  using adios2::Engine::AllStepsBlocksInfo;
+  using adios2::IO::AvailableVariables;
+  using adios2::IO::InquireVariable;
+  using adios2::IO::InquireAttribute;
+
+private:
+  adios2::IO     IOInit(const Ioss::PropertyManager &properties, bool is_input);
+  adios2::Engine EngineInit(const std::string &filename, bool is_input);
+
+  const std::string m_MetaSeparator{"::"};
+
+  const int m_Rank;
+  //  adios2::ADIOS *m_Adios;
+  const MPI_Comm m_Communicator;
+
+  // adios2::IO             m_BPIO;
+  //  mutable adios2::Engine m_BPEngine;
+  bool m_OpenStep;
+  bool m_IsStreaming;
+  int  count_real_begin = 0;
 
   };
 

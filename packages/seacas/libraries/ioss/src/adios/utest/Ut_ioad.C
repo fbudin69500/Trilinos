@@ -45,8 +45,8 @@
 
 
 //////// Global constants ////////////
-std::vector<std::string> ignored_properties = {"internal_element_count", "database_name", "global_element_block_count", 
-"internal_node_count", "border_element_count", "global_node_count", "global_element_count", "global_node_set_count", "border_node_count", "global_side_set_count"};
+std::vector<std::string> ignored_properties = {"database_name"};//"internal_element_count", "database_name", "global_element_block_count", 
+// "internal_node_count", "border_element_count", "global_node_count", "global_element_count", "global_node_set_count", "border_node_count", "global_side_set_count"};
 
 std::vector<std::string> ignored_fields = {"implicit_ids"};
 std::vector<std::string> ignore_errors = {"owning_processor"};
@@ -431,6 +431,12 @@ void create_phantom(Ioss::DatabaseIO *db)
                           Ioss::Field::RoleType::TRANSIENT, node_count);
         node_block->field_add(field);
   }
+  // Add coordinate frames
+  std::vector<double> coords(9,0);
+  Ioss::CoordinateFrame cf1(0, 'a', coords.data());
+  region->add(cf1);
+  Ioss::CoordinateFrame cf2(1, 'b', coords.data());
+  region->add(cf2);
   // Fill up the fields with some values.
   region->end_mode(Ioss::STATE_DEFINE_MODEL);
   region->begin_mode(Ioss::STATE_MODEL);

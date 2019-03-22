@@ -42,19 +42,18 @@
 #include "Ioss_EntityType.h"     // for EntityType::ELEMENTBLOCK
 #include "Ioss_FaceBlock.h"      // for FaceBlock
 #include "Ioss_FaceSet.h"        // for FaceSet
+#include "Ioss_SideBlock.h"      // for SideBlock
 #include "Ioss_FileInfo.h"       // for FileInfo
 #include "Ioss_Map.h"            // for Map, MapContainer
 #include "Ioss_NodeBlock.h"      // for NodeBlock
 #include "Ioss_NodeSet.h"         // for NodeSet
 #include "Ioss_Property.h"        // for Property
-#include "Ioss_Region.h"          // for Region, SideSetContainer, etc
-#include "Ioss_SideBlock.h"       // for SideBlock
-#include "Ioss_SideSet.h"         // for SideBlockContainer, SideSet
 #include <Ioss_CodeTypes.h>       // for HAVE_MPI
 #include <Ioss_ElementTopology.h> // for NameList
 #include <Ioss_ParallelUtils.h>   // for ParallelUtils, etc
 #include <Ioss_SerializeIO.h>     // for SerializeIO
 #include <Ioss_Utils.h>           // for Utils, IOSS_ERROR, etc
+#include <exodusII.h>
 
 #include "adios/Ioad_TemplateToValue.h"
 #include "adios/Ioad_Helper.h"
@@ -144,9 +143,11 @@ namespace Ioad {
   }
 
 // TODO: refactor and consolidate `write_meta_data_container` functions to avoid code duplication.
-  template <typename T> void DatabaseIO::write_meta_data_container(const T &entity_blocks)
+  template <typename T> int64_t DatabaseIO::write_meta_data_container(const T &entity_blocks)
   {
+    int64_t count = 0;
     for (auto entity_block : entity_blocks) {
+      count += entity_block->entity_count();
       std::string entity_type  = entity_block->type_string();
       std::string entity_name  = entity_block->name();
       std::string encoded_name = encode_field_name({entity_type, entity_name});
@@ -154,9 +155,10 @@ namespace Ioad {
       adios_wrapper.PutMetaVariable<std::string>(Topology_meta, entity_block->topology()->name(),
                                                encoded_name);
     }
+    return count;
   }
 
-  template <> void DatabaseIO::write_meta_data_container<Ioss::CommSetContainer>(const Ioss::CommSetContainer &entity_blocks)
+  template <> int64_t DatabaseIO::write_meta_data_container<Ioss::CommSetContainer>(const Ioss::CommSetContainer &entity_blocks)
   {
     for (auto entity_block : entity_blocks) {
       std::string entity_type  = entity_block->type_string();
@@ -164,13 +166,18 @@ namespace Ioad {
       std::string encoded_name = encode_field_name({entity_type, entity_name});
       write_properties(entity_block, encoded_name);
     }
+    return 0;
   }
 
-  template <>
-  void DatabaseIO::write_meta_data_container<Ioss::SideBlockContainer>(
+  std::pair<int64_t, int64_t> DatabaseIO::write_meta_data_sideblockcontainer(
       const Ioss::SideBlockContainer &entity_blocks)
   {
+    int64_t count = 0;
+    int64_t df_count     = 0;
+
     for (auto entity_block : entity_blocks) {
+      count += entity_block->entity_count();
+      df_count += entity_block->get_property("distribution_factor_count").get_int();
       std::string entity_type  = entity_block->type_string();
       std::string entity_name  = entity_block->name();
       std::string encoded_name = encode_field_name({entity_type, entity_name});
@@ -180,36 +187,56 @@ namespace Ioad {
           Parent_topology_meta, entity_block->parent_element_topology()->name(), encoded_name);
       write_properties(entity_block, encoded_name);
     }
+    return {count, df_count};
   }
 
 
   template <>
-  void DatabaseIO::write_meta_data_container<Ioss::SideSetContainer>(const Ioss::SideSetContainer &ssets)
+  int64_t DatabaseIO::write_meta_data_container<Ioss::SideSetContainer>(const Ioss::SideSetContainer &ssets)
   {
+    int64_t count = 0;
+
     for (auto &sset : ssets) {
+      count += sset->entity_count();
       const std::string entity_type = sset->type_string();
       const std::string entity_name = sset->name();
       write_properties(sset, encode_field_name({entity_type, entity_name}));
 
       // side blocks
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
-      std::string encoded_name = encode_sideblock_name(entity_type, entity_name);
+      std::string encoded_name                = encode_sideblock_name(entity_type, entity_name);
 
-      adios2::Variable<std::string> sblocks_var =
-          adios_wrapper.InquireVariable<std::string>(encoded_name);
-      if (sblocks_var) {
-        std::string stringified_sblock_names = stringify_side_block_names(sblocks);
-        adios_wrapper.Put<std::string>(
-            sblocks_var, stringified_sblock_names,
-            adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-      }
-      else {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Could not find variable '" << encoded_name << "'\n";
-        IOSS_ERROR(errmsg);
-      }
-      write_meta_data_container(sblocks);
+      std::string stringified_sblock_names = stringify_side_block_names(sblocks);
+      adios_wrapper.InquireAndPut<std::string>(encoded_name, &stringified_sblock_names);
+
+      int sblock_count = 0;
+      int df_count = 0;
+      std::tie(sblock_count, df_count) = write_meta_data_sideblockcontainer(sblocks);
+      Ioss::SideSet *new_entity = const_cast<Ioss::SideSet *>(sset);
+      new_entity->property_add(Ioss::Property("entity_count", sblock_count));
+      new_entity->property_add(Ioss::Property("distribution_factor_count", df_count));
     }
+    return count;
+  }
+
+  std::string DatabaseIO::encoded_coordinate_frame_name(Ioss::CoordinateFrame coordinate_frame)
+  {
+    int64_t id = coordinate_frame.id();
+
+    char tag = coordinate_frame.tag ();
+    std::string tag_str(1,tag);
+    return encode_field_name({coordinate_frame_name, std::to_string(id), tag_str});
+  }
+
+  template <>
+  int64_t DatabaseIO::write_meta_data_container<Ioss::CoordinateFrameContainer>(const Ioss::CoordinateFrameContainer &coordinate_frames)
+  {
+    int64_t count = 0;
+    for (auto coordinate_frame : coordinate_frames) {
+         std::string encoded_name = encoded_coordinate_frame_name(coordinate_frame);
+          adios_wrapper.InquireAndPut<double>(encoded_name, coordinate_frame.coordinates());
+    }
+  return count;
   }
 
   // Write data defined per block, not per field.
@@ -219,30 +246,43 @@ namespace Ioad {
     const Ioss::NodeBlockContainer &node_blocks = region->get_node_blocks();
 
     assert(node_blocks.size() == 1);
-
     spatialDimension = node_blocks[0]->get_property("component_degree").get_int();
 
     // Region
     write_properties(region, encode_field_name({region->type_string(), region_name}));
     // Node blocks --
-    write_meta_data_container<Ioss::NodeBlockContainer>(node_blocks);
+    nodeCount = write_meta_data_container<Ioss::NodeBlockContainer>(node_blocks);
     // Edge Blocks --
     const Ioss::EdgeBlockContainer &edge_blocks = region->get_edge_blocks();
-    write_meta_data_container<Ioss::EdgeBlockContainer>(edge_blocks);
+    edgeCount = write_meta_data_container<Ioss::EdgeBlockContainer>(edge_blocks);
     // Face Blocks --
     const Ioss::FaceBlockContainer &face_blocks = region->get_face_blocks();
-    write_meta_data_container<Ioss::FaceBlockContainer>(face_blocks);
+    faceCount = write_meta_data_container<Ioss::FaceBlockContainer>(face_blocks);
     // Element Blocks --
     const Ioss::ElementBlockContainer &element_blocks = region->get_element_blocks();
-    write_meta_data_container<Ioss::ElementBlockContainer>(element_blocks);
+    elementCount = write_meta_data_container<Ioss::ElementBlockContainer>(element_blocks);
     // Side Blocks ...
     const Ioss::SideSetContainer &ssets = region->get_sidesets();
     write_meta_data_container<Ioss::SideSetContainer>(ssets);
     // Comm Sets --
     const Ioss::CommSetContainer &comm_sets = region->get_commsets();
     write_meta_data_container<Ioss::CommSetContainer>(comm_sets);
+    // Coordinate frames --
+    const Ioss::CoordinateFrameContainer &coordinate_frames = region->get_coordinate_frames();
+    write_meta_data_container<Ioss::CoordinateFrameContainer>(coordinate_frames);
     // Global meta data
     put_data<unsigned long>(static_cast<void*>(&rank), Processor_id_meta);
+  }
+
+  void DatabaseIO::check_model()
+  {
+    Ioss::Region *                  region      = get_region();
+
+    // Add region missing properties.
+    if (!region->property_exists("title")) {
+      Ioss::Property title_property("title", "IOSS Default Output Title");
+      region->property_add(title_property);
+    }
   }
 
   bool DatabaseIO::end__(Ioss::State state)
@@ -252,6 +292,7 @@ namespace Ioad {
     switch (state) {
     case Ioss::STATE_DEFINE_MODEL:
       if (!is_input()) {
+        check_model();
         define_model();
         define_global_variables();
         write_meta_data();
@@ -291,15 +332,7 @@ namespace Ioad {
       this_region->property_update("streaming_status", static_cast<int>(status));
 
       // Add time to adios
-      adios2::Variable<double> time_var = adios_wrapper.InquireVariable<double>(Time_meta);
-      if (time_var) {
-        adios_wrapper.PutMetaVariable<double>(Time_meta, time / timeScaleFactor);
-      }
-      else {
-        std::ostringstream errmsg;
-        errmsg << "ERROR: Time variable not defined.\n";
-        IOSS_ERROR(errmsg);
-      }
+      adios_wrapper.PutMetaVariable<double>(Time_meta, time / timeScaleFactor);
     }
     else {
       if(is_streaming) {
@@ -478,6 +511,16 @@ namespace Ioad {
   }
 
 
+void DatabaseIO::define_coordinate_frames_internal(const Ioss::CoordinateFrameContainer &coordinate_frames)
+  {
+    for (auto coordinate_frame : coordinate_frames) {
+         std::string encoded_name = encoded_coordinate_frame_name(coordinate_frame);
+          adios_wrapper.DefineVariable<double>(encoded_name, {number_proc, 9, 1},
+                                  {rank, 0, 0}, {1, 9, 1});
+    }
+  }
+  
+
   // Similar to `write_meta_data()` function in other DatabaseIO. This function has been renamed in
   // this database to reflect more precisely what it accomplishes.
   void DatabaseIO::define_model(Ioss::Field::RoleType *role)
@@ -492,11 +535,7 @@ namespace Ioad {
 
     if (!role) {
       // Schema
-      adios2::Attribute<unsigned int> schema_attr =
-          adios_wrapper.InquireAttribute<unsigned int>(Schema_version_string);
-      if (!schema_attr) {
-        adios_wrapper.DefineAttribute<unsigned int>(Schema_version_string, 1);
-      }
+      adios_wrapper.DefineAttribute<unsigned int>(Schema_version_string, 1);
       // Region
       define_properties(region, encode_field_name({region->type_string(), region_name}));
     }
@@ -533,14 +572,12 @@ namespace Ioad {
     for (auto &sset : ssets) {
       std::string encoded_name = encode_sideblock_name(sset->type_string(), sset->name());
       const Ioss::SideBlockContainer &sblocks = sset->get_side_blocks();
-      adios2::Variable<std::string> sblocks_var =
-          adios_wrapper.InquireVariable<std::string>(encoded_name);
-      if (!sblocks_var) {
-        std::string stringified_side_block_names = stringify_side_block_names(sblocks);
-        adios_wrapper.DefineVariable<std::string>(encoded_name);
-      }
+      adios_wrapper.DefineVariable<std::string>(encoded_name);
       define_entity_internal(sblocks, role);
     }
+    // Coordinate frames ...
+    const Ioss::CoordinateFrameContainer &coordinate_frames = region->get_coordinate_frames();
+    define_coordinate_frames_internal(coordinate_frames);
   }
 
   void DatabaseIO::define_global_variables()
@@ -585,17 +622,8 @@ namespace Ioad {
   template <typename T>
   void DatabaseIO::put_data(void *data, const std::string &encoded_name) const
   {
-    adios2::Variable<T> entities = adios_wrapper.InquireVariable<T>(encoded_name);
-    if (entities) {
-      T *rdata = static_cast<T *>(data);
-      adios_wrapper.Put<T>(entities, rdata,
-                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
-    }
-    else {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: Could not find variable '" << encoded_name << "'\n";
-      IOSS_ERROR(errmsg);
-    }
+    T *rdata = static_cast<T *>(data);
+    adios_wrapper.InquireAndPut<T>(encoded_name, rdata);
   }
 
   void DatabaseIO::put_meta_variables(const std::string &encoded_name, const Ioss::Field &field,
@@ -758,19 +786,8 @@ namespace Ioad {
     return FieldInfoType();
   }
 
-  template <typename T> T DatabaseIO::get_attribute(const std::string &attribute_name)
-  {
-    adios2::Attribute<T> attribute = adios_wrapper.InquireAttribute<T>(attribute_name);
-    if (!attribute) {
-      std::ostringstream errmsg;
-      errmsg << "ERROR: " << attribute_name << " not found.\n";
-      IOSS_ERROR(errmsg);
-    }
-    return attribute.Data()[0];
-  }
-
   template <>
-  void DatabaseIO::get_entities<Ioss::NodeBlock>(const FieldsMapType &fields_map,
+  int64_t DatabaseIO::get_entities<Ioss::NodeBlock>(const FieldsMapType &fields_map,
                                                  const FieldsMapType &properties_map)
   {
     const std::string block_type = get_entity_type<Ioss::NodeBlock>();
@@ -786,8 +803,6 @@ namespace Ioad {
     FieldInfoType model_coordinates_infos = get_expected_variable_infos_from_map<double>(
         entity_map, block_type, block_name, coord_var_name);
     spatialDimension = model_coordinates_infos.component_count;
-    // For debug purposes
-    if(!spatialDimension) spatialDimension = 3;
     if (!spatialDimension) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Variable `" << coord_var_name
@@ -818,6 +833,7 @@ namespace Ioad {
     if (!added) {
       delete block;
     }
+    return model_coordinates_infos.node_boundaries_size;
   }
 
   template <typename T>
@@ -828,8 +844,7 @@ namespace Ioad {
     // Meta variable read with `Get()` instead of `GetMetaVariable()` because name is already
     // encoded. `GetMetaVariable()` simply encodes the variable name as a meta variable before
     // performing a `Get()` call.
-    adios_wrapper.Get<T>(encoded_name, variable,
-                         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+    adios_wrapper.GetSync<T>(encoded_name, variable);
     Ioss::Property property(property_name, variable);
     ge->property_add(property);
   }
@@ -907,8 +922,7 @@ namespace Ioad {
       // Meta variable read with `Get()` instead of `GetMetaVariable()` because name is already
       // encoded. `GetMetaVariable()` simply encodes the variable name as a meta variable before
       // performing a `Get()` call.
-      adios_wrapper.Get<T>(encoded_name, property_value,
-                         adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      adios_wrapper.GetSync<T>(encoded_name, property_value);
     }
     return property_value;
   }
@@ -916,12 +930,13 @@ namespace Ioad {
 
 
   template <>
-  void DatabaseIO::get_entities<Ioss::SideSet>(const FieldsMapType &fields_map,
+  int64_t DatabaseIO::get_entities<Ioss::SideSet>(const FieldsMapType &fields_map,
                                                const FieldsMapType &properties_map)
   {
+    int64_t count = 0;
     std::string entity_type = get_entity_type<Ioss::SideSet>();
     if (fields_map.find(entity_type) == fields_map.end()) {
-      return;
+      return count;
     }
     std::string sideblock_type = get_entity_type<Ioss::SideBlock>();
     // Do SideBlocks exist in the fields_map. This will be used when loading the SideBlock
@@ -937,7 +952,7 @@ namespace Ioad {
       add_entity_properties(ss, properties_map);
       if (!ss_added) {
         delete ss;
-        return;
+        return count;
       }
       for (auto &variable_pair : entity.second) {
         // Since some fields are created automatically, we need to avoid recreating them when
@@ -951,6 +966,7 @@ namespace Ioad {
             // the entity size?
             Ioss::Field field(variable_pair.first, infos.basic_type, infos.variable_type,
                               infos.role, infos.node_boundaries_size);
+            count += infos.node_boundaries_size;
             ss->field_add(field);
           }
         }
@@ -966,7 +982,7 @@ namespace Ioad {
 
           if (sideblock_var) {
             std::string stringified_names;
-            adios_wrapper.Get<std::string>(sideblock_var, stringified_names, adios2::Mode::Sync);
+            adios_wrapper.GetSync<std::string>(sideblock_var, stringified_names);
             std::vector<std::string> block_names = Ioss::tokenize(stringified_names, Sideblock_separator);
             for (std::string block_name : block_names) {
               if (sideblocks_map.find(block_name) != sideblocks_map.end()) {
@@ -1012,17 +1028,19 @@ namespace Ioad {
         }
       }
     }
+    return count;
   }
 
 
 
   template <typename T>
-  void DatabaseIO::get_entities(const FieldsMapType &fields_map,
+  int64_t DatabaseIO::get_entities(const FieldsMapType &fields_map,
                                 const FieldsMapType &properties_map)
   {
+    int64_t count = 0;
     std::string entity_type = get_entity_type<T>();
     if (fields_map.find(entity_type) == fields_map.end()) {
-      return;
+      return count;
     }
     const EntityMapType &entity_map = fields_map.at(entity_type);
     for (auto &variable_pair : entity_map) {
@@ -1034,6 +1052,7 @@ namespace Ioad {
       block_type = block_type.empty() ? infos_to_create_entity.topology : block_type; 
       T *entity = NewEntity<T>(this, entity_name, block_type,
                                infos_to_create_entity.node_boundaries_size);
+      count += infos_to_create_entity.node_boundaries_size;
       add_entity_properties(entity, properties_map);
 
       bool added = get_region()->add(entity);
@@ -1057,17 +1076,19 @@ namespace Ioad {
         }
       }
     }
+    return count;
   }
 
   // TODO: Consolidate this code with generice `get_entities()`  function as there is very little difference
   // between the two.
   template <>
-  void DatabaseIO::get_entities<Ioss::CommSet>(const FieldsMapType &fields_map,
+  int64_t DatabaseIO::get_entities<Ioss::CommSet>(const FieldsMapType &fields_map,
                                 const FieldsMapType &properties_map)
   {
+    int64_t count = 0;
     std::string entity_type = get_entity_type<Ioss::CommSet>();
     if (fields_map.find(entity_type) == fields_map.end()) {
-      return;
+      return count;
     }
     const EntityMapType &entity_map = fields_map.at(entity_type);
     for (auto &variable_pair : entity_map) {
@@ -1081,6 +1102,7 @@ namespace Ioad {
       block_type = block_type.empty() ? infos_to_create_entity.topology : block_type; 
       Ioss::CommSet *entity = NewEntity<Ioss::CommSet>(this, commset_name, block_type,
                                infos_to_create_entity.node_boundaries_size);
+      count += infos_to_create_entity.node_boundaries_size;
       add_entity_properties(entity, properties_map);
       // Save original name as entity property
       Ioss::Property property(original_name, entity_name);
@@ -1107,6 +1129,7 @@ namespace Ioad {
         }
       }
     }
+    return count;
   }
 
 
@@ -1145,6 +1168,7 @@ namespace Ioad {
       // Note: one block per rank.
       for (auto &block : blocks) {
         if (block.Start[0] != rank) {
+          infos.global_size += block.Count[1];
           // This is not the block corresponding to the current process (rank).
           continue;
         }
@@ -1217,15 +1241,7 @@ namespace Ioad {
   void DatabaseIO::get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map)
   {
     // Check "time" attribute and global variable.
-    adios2::Attribute<double> timeScaleFactor_attr =
-        adios_wrapper.InquireAttribute<double>(Time_scale_factor);
-    if (timeScaleFactor_attr) {
-      timeScaleFactor = get_attribute<double>(Time_scale_factor);
-    }
-    else {
-      timeScaleFactor = 1.0;
-    }
-
+    timeScaleFactor = adios_wrapper.GetAttribute<double>(Time_scale_factor, true, 1.0);
     Ioss::SerializeIO serializeIO__(this);
     Ioss::Region *    this_region = get_region();
     if (globals_map.find(Time_meta) != globals_map.end()) {
@@ -1244,7 +1260,7 @@ namespace Ioad {
           // errmsg << "ERROR: Streaming is not yet supported for reading.\n";
           // IOSS_ERROR(errmsg);
         }
-        adios_wrapper.Get(time_var, tsteps.data(), adios2::Mode::Sync);
+        adios_wrapper.GetSync(time_var, tsteps.data());
         for (size_t step = 0; step < time_var.Steps(); step++) {
           // if (tsteps[i] <= last_time) { TODO: Check last time step before writing everything
           this_region->add_state__(tsteps[step] * timeScaleFactor);
@@ -1270,7 +1286,7 @@ namespace Ioad {
        region->property_update("streaming", 1);
     }
     // Only get schema version attribute as it is the only one we expect.
-    get_attribute<unsigned int>(Schema_version_string);
+    adios_wrapper.GetAttribute<unsigned int>(Schema_version_string);
 
     // Get all variables
     GlobalMapType globals_map;
@@ -1314,14 +1330,11 @@ namespace Ioad {
       }
     }
 
-    // read_region(reader_io);
-    // read_communication_metadata();
-
     get_globals(globals_map, properties_map);
-    get_entities<Ioss::NodeBlock>(fields_map, properties_map);
-    get_entities<Ioss::EdgeBlock>(fields_map, properties_map);
-    get_entities<Ioss::FaceBlock>(fields_map, properties_map);
-    get_entities<Ioss::ElementBlock>(fields_map, properties_map);
+    nodeCount = get_entities<Ioss::NodeBlock>(fields_map, properties_map);
+    edgeCount = get_entities<Ioss::EdgeBlock>(fields_map, properties_map);
+    faceCount = get_entities<Ioss::FaceBlock>(fields_map, properties_map);
+    elementCount = get_entities<Ioss::ElementBlock>(fields_map, properties_map);
     check_side_topology();
     get_entities<Ioss::SideSet>(fields_map, properties_map);
     get_entities<Ioss::NodeSet>(fields_map, properties_map);
@@ -1330,36 +1343,106 @@ namespace Ioad {
     get_entities<Ioss::ElementSet>(fields_map, properties_map);
     get_entities<Ioss::CommSet>(fields_map, properties_map);
 
-    // Add region missing properties.
-    if (!region->property_exists("title")) {
-      Ioss::Property title_property("title", "IOSS Default Output Title");
-      region->property_add(title_property);
-    }
-
-//     region->property_add(Ioss::Property("global_node_count", global_nodes));
-//     region->property_add(Ioss::Property("global_element_count", global_elements));
-//     region->property_add(Ioss::Property("global_element_block_count", global_eblocks));
-//     region->property_add(Ioss::Property("global_node_set_count", global_nsets));
-//     region->property_add(Ioss::Property("global_side_set_count", global_ssets));
-
-    // handle_groups();
-
-    // add_region_fields();
-
-    // if (!is_input() && open_create_behavior() == Ioss::DB_APPEND) {
-    //   get_map(EX_NODE_BLOCK);
-    //   get_map(EX_EDGE_BLOCK);
-    //   get_map(EX_FACE_BLOCK);
-    //   get_map(EX_ELEM_BLOCK);
-    // }
+    read_region(fields_map);
+    read_communication_metadata();
   }
 
+  void DatabaseIO::read_region(const FieldsMapType &fields_map)
+  {
+    // // Add properties and fields to the 'owning' region.
+    // // Also defines member variables of this class...
 
+    if (nodeCount == 0) {
+      IOSS_WARNING << "No nodes were found in the model, file '" << decoded_filename() << "'\n";
+    }
+    else if (nodeCount < 0) {
+      // NOTE: Code will not continue past this call...
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Negative node count was found in the model\n"
+             << "       File: '" << decoded_filename() << "'.\n";
+      IOSS_ERROR(errmsg);
+    }
+
+    if (elementCount == 0) {
+      IOSS_WARNING << "No elements were found in the model, file: '" << decoded_filename() << "'\n";
+    }
+
+    if (elementCount < 0) {
+      // NOTE: Code will not continue past this call...
+      std::ostringstream errmsg;
+      errmsg << "ERROR: Negative element count was found in the model, file: '"
+             << decoded_filename() << "'";
+      IOSS_ERROR(errmsg);
+    }
+    Ioss::Region *    region = get_region();
+
+    // See if any coordinate frames exist on mesh.  If so, define them on region.
+    //add_coordinate_frames();
+    if (fields_map.find(coordinate_frame_name) != fields_map.end()) {
+      const EntityMapType &entity_map = fields_map.at(coordinate_frame_name);
+      for (auto &variable_pair : entity_map) {
+        std::vector<double> coord(9,0);
+
+        int64_t id = std::stoll(variable_pair.first);
+        char tag = variable_pair.second.begin()->first[0];
+        std::string var_name = variable_pair.second.begin()->second.first;
+        adios_wrapper.GetSync(var_name, coord.data());
+        Ioss::CoordinateFrame coordinate_frame(id, tag, coord.data());
+        region->add(coordinate_frame);
+      }
+    }
+  }
+
+  void DatabaseIO::read_communication_metadata()
+  {
+    // Number of processors file was decomposed for
+    int  num_proc = adios_wrapper.GetAttribute<unsigned long>(Processor_number_meta);
+
+    // Get global data (over all processors)
+    int64_t global_nodes    = nodeCount;
+    int64_t global_elements = elementCount;
+    int64_t global_eblocks  = 0; // unused
+    int64_t global_nsets    = 0; // unused
+    int64_t global_ssets    = 0; // unused
+
+    int64_t num_internal_nodes = nodeCount;
+    int64_t num_border_nodes   = 0;
+    int64_t num_internal_elems = elementCount;
+    int64_t num_border_elems   = 0;
+
+    Ioss::Region *region = get_region();
+
+    region->property_add(Ioss::Property("processor_count", num_proc));
+
+    region->property_add(Ioss::Property("internal_node_count", num_internal_nodes));
+    region->property_add(Ioss::Property("border_node_count", num_border_nodes));
+    region->property_add(Ioss::Property("internal_element_count", num_internal_elems));
+    region->property_add(Ioss::Property("border_element_count", num_border_elems));
+    region->property_add(Ioss::Property("global_node_count", global_nodes));
+    region->property_add(Ioss::Property("global_element_count", global_elements));
+    region->property_add(Ioss::Property("global_element_block_count", global_eblocks));
+    region->property_add(Ioss::Property("global_node_set_count", global_nsets));
+    region->property_add(Ioss::Property("global_side_set_count", global_ssets));
+
+    // Possibly, the following 4 fields should be nodesets and element
+    // sets instead of fields on the region...
+    region->field_add(Ioss::Field("internal_nodes", region->field_int_type(), IOSS_SCALAR(),
+                                  Ioss::Field::COMMUNICATION, num_internal_nodes));
+    region->field_add(Ioss::Field("border_nodes", region->field_int_type(), IOSS_SCALAR(),
+                                  Ioss::Field::COMMUNICATION, num_border_nodes));
+    region->field_add(Ioss::Field("internal_elements", region->field_int_type(), IOSS_SCALAR(),
+                                  Ioss::Field::COMMUNICATION, num_internal_elems));
+    region->field_add(Ioss::Field("border_elements", region->field_int_type(), IOSS_SCALAR(),
+                                  Ioss::Field::COMMUNICATION, num_border_elems));
+
+    assert(nodeCount == num_internal_nodes + num_border_nodes);
+    assert(elementCount == num_internal_elems + num_border_elems);
+  }
   void DatabaseIO::check_processor_info()
   {
     std::ostringstream errmsg;
     // Get Processor information
-    unsigned long number_proc_read = get_attribute<unsigned long>(Processor_number_meta);
+    unsigned long number_proc_read = adios_wrapper.GetAttribute<unsigned long>(Processor_number_meta);
 
     if (number_proc < number_proc_read) {
         errmsg << "Processor decomposition count in file ("
@@ -1556,8 +1639,7 @@ namespace Ioad {
       }
 
       // TODO: Set selection per rank. Support written by N processes, and loaded by M processes.
-      adios_wrapper.Get<T>(entities, rdata,
-                           adios2::Mode::Sync); // If not Sync, variables are not saved correctly.
+      adios_wrapper.GetSync<T>(entities, rdata);
     }
     else {
       if (!is_streaming) {

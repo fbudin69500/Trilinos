@@ -58,6 +58,8 @@ namespace Ioad {
     const std::string     region_name           = "no_name";
     const std::string     original_name         = "original_name";
     constexpr const char *sideblock_names       = "sideblock_names";
+
+    const std::string     coordinate_frame_name = "CoordinateFrame";
     const std::map<std::string, std::set<std::string>> Use_transformed_storage_map = {
         {"ElementBlock", {"connectivity_edge", "connectivity_face"}},
         {"FaceBlock", {"connectivity_edge"}}};
